@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "crates/pingora_web",
+    "examples/pingora_example",
+]
+resolver = "2"
