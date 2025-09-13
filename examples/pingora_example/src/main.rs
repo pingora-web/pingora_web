@@ -1,11 +1,14 @@
 use async_trait::async_trait;
 // use pingora::apps::http_app::HttpServer; // not needed when passing App directly
-use futures::{StreamExt, stream};
 use bytes::Bytes;
+use futures::{StreamExt, stream};
 use pingora::server::Server;
 use pingora::services::listening::Service;
 use pingora_web::utils::ServeDir;
-use pingora_web::{App, Handler, Request, Response, Router, TracingMiddleware, LimitsMiddleware, LimitsConfig, PanicRecoveryMiddleware, CompressionMiddleware, CompressionConfig};
+use pingora_web::{
+    App, CompressionConfig, CompressionMiddleware, Handler, LimitsConfig, LimitsMiddleware,
+    PanicRecoveryMiddleware, Request, Response, Router, TracingMiddleware,
+};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -176,11 +179,11 @@ fn main() {
 
     // 配置全局限制中间件
     let limits_config = LimitsConfig::new()
-        .request_timeout(std::time::Duration::from_secs(30))  // 30秒超时
-        .max_body_size(2 * 1024 * 1024)                      // 2MB 最大请求体
-        .max_path_length(1024)                               // 1KB 最大路径长度
-        .max_headers(50)                                     // 最多50个头部
-        .max_header_size(4 * 1024);                          // 4KB 最大头部大小
+        .request_timeout(std::time::Duration::from_secs(30)) // 30秒超时
+        .max_body_size(2 * 1024 * 1024) // 2MB 最大请求体
+        .max_path_length(1024) // 1KB 最大路径长度
+        .max_headers(50) // 最多50个头部
+        .max_header_size(4 * 1024); // 4KB 最大头部大小
 
     // 中间件顺序：TracingMiddleware在最外层记录所有请求
     app.use_middleware(TracingMiddleware::new());
@@ -188,9 +191,7 @@ fn main() {
     app.use_middleware(LimitsMiddleware::with_config(limits_config));
 
     // 配置压缩中间件：压缩级别6，最小压缩大小1KB
-    let compression_config = CompressionConfig::new()
-        .level(6)
-        .min_size(1024);
+    let compression_config = CompressionConfig::new().level(6).min_size(1024);
     app.use_middleware(CompressionMiddleware::with_config(compression_config));
     // 添加请求级共享数据（插入开始时间）
     // router 已在构造时设置
@@ -301,10 +302,13 @@ impl Handler for LargeJsonHandler {
             }))
             .collect();
 
-        Response::json(200, serde_json::json!({
-            "users": data,
-            "total": 100,
-            "message": "这是一个大的JSON响应，包含重复数据用于测试压缩功能"
-        }))
+        Response::json(
+            200,
+            serde_json::json!({
+                "users": data,
+                "total": 100,
+                "message": "这是一个大的JSON响应，包含重复数据用于测试压缩功能"
+            }),
+        )
     }
 }

@@ -18,7 +18,6 @@ impl Response {
         }
     }
 
-
     pub fn text<S: Into<String>>(status: u16, body: S) -> Self {
         let mut res = Self::new(status);
         res.headers.insert(
@@ -82,16 +81,19 @@ impl Response {
     pub fn stream_file<P: AsRef<std::path::Path>>(status: u16, path: P) -> Self {
         let mut res = Self::new(status);
         let ct = mime_guess::from_path(path.as_ref()).first_or_octet_stream();
-        let _ = res
-            .headers
-            .insert(http::header::CONTENT_TYPE, HeaderValue::from_str(ct.as_ref()).unwrap_or(HeaderValue::from_static("application/octet-stream")));
+        let _ = res.headers.insert(
+            http::header::CONTENT_TYPE,
+            HeaderValue::from_str(ct.as_ref())
+                .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+        );
 
         // For files, we can set content-length if we know the file size
         if let Ok(meta) = std::fs::metadata(path.as_ref()) {
             let len_s = meta.len().to_string();
-            let _ = res
-                .headers
-                .insert(http::header::CONTENT_LENGTH, HeaderValue::from_str(&len_s).unwrap_or(HeaderValue::from_static("0")));
+            let _ = res.headers.insert(
+                http::header::CONTENT_LENGTH,
+                HeaderValue::from_str(&len_s).unwrap_or(HeaderValue::from_static("0")),
+            );
         }
 
         // Build an async stream that reads the file chunk by chunk
@@ -213,7 +215,10 @@ mod tests {
     fn response_constructors() {
         // Test that constructors create proper bodies without setting content-length
         let res = Response::text(200, "hello world");
-        assert_eq!(res.headers.get(http::header::CONTENT_TYPE).unwrap(), &HeaderValue::from_static("text/plain; charset=utf-8"));
+        assert_eq!(
+            res.headers.get(http::header::CONTENT_TYPE).unwrap(),
+            &HeaderValue::from_static("text/plain; charset=utf-8")
+        );
         // content-length should be set by App.handle(), not here
         assert!(!res.headers.contains_key("content-length"));
 
@@ -235,6 +240,9 @@ mod tests {
         let mut res = Response::text(200, "hello");
         res.set_header("content-length", "999");
         // Manual content-length should be preserved
-        assert_eq!(res.headers.get(http::header::CONTENT_LENGTH).unwrap(), &HeaderValue::from_static("999"));
+        assert_eq!(
+            res.headers.get(http::header::CONTENT_LENGTH).unwrap(),
+            &HeaderValue::from_static("999")
+        );
     }
 }

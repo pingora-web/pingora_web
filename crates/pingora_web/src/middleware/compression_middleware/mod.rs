@@ -1,11 +1,11 @@
 use async_trait::async_trait;
-use std::sync::Arc;
+use flate2::{Compression, write::GzEncoder};
+use futures::{StreamExt, stream::BoxStream};
 use std::io::Write;
-use flate2::{write::GzEncoder, Compression};
-use futures::{stream::BoxStream, StreamExt};
+use std::sync::Arc;
 
-use crate::core::{Request, Response, response::Body, router::Handler};
 use super::Middleware;
+use crate::core::{Request, Response, response::Body, router::Handler};
 
 /// Compression algorithms supported by the middleware
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +40,7 @@ pub struct CompressionConfig {
 impl Default for CompressionConfig {
     fn default() -> Self {
         Self {
-            level: 6, // Default compression level
+            level: 6,       // Default compression level
             min_size: 1024, // Only compress responses >= 1KB
             algorithms: vec![CompressionAlgorithm::Gzip],
             compress_types: vec![
@@ -133,8 +133,7 @@ impl CompressionMiddleware {
 
     /// Choose the best compression algorithm based on client support
     fn choose_algorithm(&self, req: &Request) -> Option<CompressionAlgorithm> {
-        self
-            .config
+        self.config
             .algorithms
             .iter()
             .find(|&&algorithm| self.accepts_encoding(req, algorithm.encoding_name()))
@@ -194,7 +193,11 @@ impl CompressionMiddleware {
     }
 
     /// Compress byte data using the specified algorithm
-    fn compress_bytes(&self, data: &[u8], algorithm: CompressionAlgorithm) -> Result<Vec<u8>, std::io::Error> {
+    fn compress_bytes(
+        &self,
+        data: &[u8],
+        algorithm: CompressionAlgorithm,
+    ) -> Result<Vec<u8>, std::io::Error> {
         match algorithm {
             CompressionAlgorithm::Gzip => {
                 let mut encoder = GzEncoder::new(Vec::new(), Compression::new(self.config.level));
@@ -236,7 +239,10 @@ impl CompressionMiddleware {
                                 // Take compressed data so far without allocating
                                 let compressed = std::mem::take(encoder.get_mut());
 
-                                Some((bytes::Bytes::from(compressed), (stream, Some(encoder), false)))
+                                Some((
+                                    bytes::Bytes::from(compressed),
+                                    (stream, Some(encoder), false),
+                                ))
                             }
                             None => {
                                 // Finish compression
@@ -248,7 +254,7 @@ impl CompressionMiddleware {
                                 }
                             }
                         }
-                    }
+                    },
                 ))
             }
         }

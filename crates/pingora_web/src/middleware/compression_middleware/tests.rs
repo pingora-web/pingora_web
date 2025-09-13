@@ -1,8 +1,8 @@
 use super::*;
 use crate::core::{Method, Request, Response, response::Body, router::Handler};
 use async_trait::async_trait;
-use std::io::Read;
 use flate2::read::GzDecoder;
+use std::io::Read;
 
 struct MockHandler {
     body: bytes::Bytes,
@@ -41,7 +41,8 @@ async fn test_compresses_text_response() {
     let handler = MockHandler::new(response);
 
     let mut req = Request::new(Method::GET, "/test");
-    req.headers_mut().insert("accept-encoding", "gzip".try_into().unwrap());
+    req.headers_mut()
+        .insert("accept-encoding", "gzip".try_into().unwrap());
 
     let result = middleware.handle(req, handler).await;
 
@@ -82,7 +83,8 @@ async fn test_skips_small_response() {
     let handler = MockHandler::new(response);
 
     let mut req = Request::new(Method::GET, "/test");
-    req.headers_mut().insert("accept-encoding", "gzip".try_into().unwrap());
+    req.headers_mut()
+        .insert("accept-encoding", "gzip".try_into().unwrap());
 
     let result = middleware.handle(req, handler).await;
 
@@ -100,7 +102,8 @@ async fn test_skips_unsupported_content_type() {
     let handler = MockHandler::new(response);
 
     let mut req = Request::new(Method::GET, "/test");
-    req.headers_mut().insert("accept-encoding", "gzip".try_into().unwrap());
+    req.headers_mut()
+        .insert("accept-encoding", "gzip".try_into().unwrap());
 
     let result = middleware.handle(req, handler).await;
 
@@ -116,7 +119,8 @@ async fn test_skips_when_client_doesnt_support_gzip() {
     let handler = MockHandler::new(response);
 
     let mut req = Request::new(Method::GET, "/test");
-    req.headers_mut().insert("accept-encoding", "deflate".try_into().unwrap());
+    req.headers_mut()
+        .insert("accept-encoding", "deflate".try_into().unwrap());
 
     let result = middleware.handle(req, handler).await;
 
@@ -138,7 +142,8 @@ async fn test_compresses_json_response() {
     let handler = MockHandler::new(response);
 
     let mut req = Request::new(Method::GET, "/api/data");
-    req.headers_mut().insert("accept-encoding", "gzip".try_into().unwrap());
+    req.headers_mut()
+        .insert("accept-encoding", "gzip".try_into().unwrap());
 
     let result = middleware.handle(req, handler).await;
 
@@ -164,13 +169,15 @@ async fn test_respects_existing_content_encoding() {
     let middleware = CompressionMiddleware::new();
     let large_text = "x".repeat(2000);
     let mut response = Response::text(200, &large_text);
-    response
-        .headers
-        .insert(http::header::CONTENT_ENCODING, http::HeaderValue::from_static("br"));
+    response.headers.insert(
+        http::header::CONTENT_ENCODING,
+        http::HeaderValue::from_static("br"),
+    );
     let handler = MockHandler::new(response);
 
     let mut req = Request::new(Method::GET, "/test");
-    req.headers_mut().insert("accept-encoding", "gzip".try_into().unwrap());
+    req.headers_mut()
+        .insert("accept-encoding", "gzip".try_into().unwrap());
 
     let result = middleware.handle(req, handler).await;
 
@@ -195,7 +202,8 @@ async fn test_compress_all_types_when_filtering_disabled() {
     let handler = MockHandler::new(response);
 
     let mut req = Request::new(Method::GET, "/binary");
-    req.headers_mut().insert("accept-encoding", "gzip".try_into().unwrap());
+    req.headers_mut()
+        .insert("accept-encoding", "gzip".try_into().unwrap());
 
     let result = middleware.handle(req, handler).await;
 
@@ -227,7 +235,8 @@ async fn test_content_type_filtering_enabled() {
     let handler = MockHandler::new(response);
 
     let mut req = Request::new(Method::GET, "/binary");
-    req.headers_mut().insert("accept-encoding", "gzip".try_into().unwrap());
+    req.headers_mut()
+        .insert("accept-encoding", "gzip".try_into().unwrap());
 
     let result = middleware.handle(req, handler).await;
 

@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use std::sync::Arc;
-use std::panic::AssertUnwindSafe;
 use futures::FutureExt;
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 
-use crate::core::{Request, Response, router::Handler};
 use super::Middleware;
+use crate::core::{Request, Response, router::Handler};
 
 /// Simple panic recovery middleware that catches panics and returns 500 errors
 pub struct PanicRecoveryMiddleware;
@@ -25,9 +25,7 @@ impl Default for PanicRecoveryMiddleware {
 impl Middleware for PanicRecoveryMiddleware {
     async fn handle(&self, req: Request, next: Arc<dyn Handler>) -> Response {
         // Wrap the next handler call in a catch_unwind
-        let result = AssertUnwindSafe(next.handle(req))
-            .catch_unwind()
-            .await;
+        let result = AssertUnwindSafe(next.handle(req)).catch_unwind().await;
 
         result.unwrap_or_else(|panic_info| {
             // Extract panic message if possible

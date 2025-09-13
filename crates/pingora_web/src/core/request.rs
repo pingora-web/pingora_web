@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::core::data::AppData;
 use bytes::Bytes;
-use http::{Method, HeaderMap, HeaderValue, Uri};
+use http::{HeaderMap, HeaderValue, Method, Uri};
 
 #[derive(Debug)]
 pub struct Request {

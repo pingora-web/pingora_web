@@ -64,43 +64,41 @@ impl App {
             let path = req.path();
             self.router.find(method, path)
         };
-        let (handler, params): (
-            Arc<dyn Handler>,
-            std::collections::HashMap<String, String>,
-        ) = match find_result {
-            Some((h, p)) => (h, p),
-            None => {
-                let path = req.path();
-                let method = req.method();
-                let mut allowed = self.router.allowed_methods(path);
-                if *method == Method::OPTIONS {
-                    // For OPTIONS, respond with 204 No Content and Allow header when no explicit route
-                    allowed.push("OPTIONS".to_string());
-                    allowed.sort();
-                    allowed.dedup();
-                    let mut res = Response::text(204, "");
-                    let allow_header = allowed.join(", ");
-                    res.headers.insert(
-                        http::header::ALLOW,
-                        http::HeaderValue::from_str(&allow_header).unwrap(),
-                    );
-                    return res;
+        let (handler, params): (Arc<dyn Handler>, std::collections::HashMap<String, String>) =
+            match find_result {
+                Some((h, p)) => (h, p),
+                None => {
+                    let path = req.path();
+                    let method = req.method();
+                    let mut allowed = self.router.allowed_methods(path);
+                    if *method == Method::OPTIONS {
+                        // For OPTIONS, respond with 204 No Content and Allow header when no explicit route
+                        allowed.push("OPTIONS".to_string());
+                        allowed.sort();
+                        allowed.dedup();
+                        let mut res = Response::text(204, "");
+                        let allow_header = allowed.join(", ");
+                        res.headers.insert(
+                            http::header::ALLOW,
+                            http::HeaderValue::from_str(&allow_header).unwrap(),
+                        );
+                        return res;
+                    }
+                    // If a different method matches this path, return 405 with Allow header
+                    if !allowed.is_empty() {
+                        let allow_header = allowed.join(", ");
+                        let mut res = Response::text(405, "Method Not Allowed");
+                        res.headers.insert(
+                            http::header::ALLOW,
+                            http::HeaderValue::from_str(&allow_header).unwrap(),
+                        );
+                        return res;
+                    }
+                    // Fallback 404 handler when no route matches
+                    let h: Arc<dyn core::router::Handler> = Arc::new(NotFoundHandler);
+                    (h, Default::default())
                 }
-                // If a different method matches this path, return 405 with Allow header
-                if !allowed.is_empty() {
-                    let allow_header = allowed.join(", ");
-                    let mut res = Response::text(405, "Method Not Allowed");
-                    res.headers.insert(
-                        http::header::ALLOW,
-                        http::HeaderValue::from_str(&allow_header).unwrap(),
-                    );
-                    return res;
-                }
-                // Fallback 404 handler when no route matches
-                let h: Arc<dyn core::router::Handler> = Arc::new(NotFoundHandler);
-                (h, Default::default())
-            }
-        };
+            };
 
         // Add route parameters and app-level data to request
         let req_with_params = req.with_params(params).with_app_data(self.app_data.clone());
@@ -118,7 +116,9 @@ impl App {
     fn finalize_response_headers(&self, response: &mut Response) {
         // Only set headers if neither content-length nor transfer-encoding is already set
         if response.headers.contains_key(http::header::CONTENT_LENGTH)
-            || response.headers.contains_key(http::header::TRANSFER_ENCODING)
+            || response
+                .headers
+                .contains_key(http::header::TRANSFER_ENCODING)
         {
             return;
         }
@@ -142,7 +142,6 @@ impl App {
         }
     }
 }
-
 
 use futures::StreamExt;
 use pingora::server::ShutdownWatch;
@@ -460,7 +459,9 @@ mod tests {
         );
 
         match res.body {
-            core::response::Body::Bytes(b) => assert_eq!(std::str::from_utf8(&b).unwrap(), "hello world"),
+            core::response::Body::Bytes(b) => {
+                assert_eq!(std::str::from_utf8(&b).unwrap(), "hello world")
+            }
             _ => panic!("unexpected streaming body"),
         }
     }

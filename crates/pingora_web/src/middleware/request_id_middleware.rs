@@ -44,9 +44,10 @@ impl Middleware for RequestId {
 
         // Ensure response has the request ID header
         if !res.headers.contains_key(self.header) {
-            let _ = res
-                .headers
-                .insert(self.header, http::HeaderValue::from_str(&request_id).unwrap());
+            let _ = res.headers.insert(
+                self.header,
+                http::HeaderValue::from_str(&request_id).unwrap(),
+            );
         }
         res
     }

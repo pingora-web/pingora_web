@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
 
-use crate::core::{Request, Response, router::Handler};
 use super::Middleware;
+use crate::core::{Request, Response, router::Handler};
 
 /// Configuration for timeout and size limits
 #[derive(Clone)]
@@ -238,9 +238,12 @@ mod tests {
 
         let handler = MockHandler::new();
         let mut req = Request::new(Method::GET, "/test");
-        req.headers_mut().insert("header1", "value1".try_into().unwrap());
-        req.headers_mut().insert("header2", "value2".try_into().unwrap());
-        req.headers_mut().insert("header3", "value3".try_into().unwrap());
+        req.headers_mut()
+            .insert("header1", "value1".try_into().unwrap());
+        req.headers_mut()
+            .insert("header2", "value2".try_into().unwrap());
+        req.headers_mut()
+            .insert("header3", "value3".try_into().unwrap());
 
         let response = middleware.handle(req, handler).await;
         assert_eq!(response.status.as_u16(), 431);
@@ -253,7 +256,8 @@ mod tests {
 
         let handler = MockHandler::new();
         let mut req = Request::new(Method::GET, "/test");
-        req.headers_mut().insert("x-long", "very-long-value".try_into().unwrap());
+        req.headers_mut()
+            .insert("x-long", "very-long-value".try_into().unwrap());
 
         let response = middleware.handle(req, handler).await;
         assert_eq!(response.status.as_u16(), 431);
