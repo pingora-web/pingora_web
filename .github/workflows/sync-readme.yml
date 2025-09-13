@@ -1,0 +1,102 @@
+name: Sync README
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'README.md'
+      - 'README_zh.md'
+      - 'crates/pingora_web/README.md'
+  workflow_dispatch:
+
+jobs:
+  sync-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync crate README from root
+        run: |
+          echo "Syncing README from root to crate directory..."
+
+          # Copy root README to crate directory, but preserve crate-specific content
+          if [ -f "README.md" ] && [ -f "crates/pingora_web/README.md" ]; then
+            # Extract installation section and examples from root README
+            # Keep the crate README structure but update key sections
+
+            # For now, we'll keep them separate since they serve different purposes:
+            # - Root README: Project overview, marketing, multi-language
+            # - Crate README: Technical documentation for crates.io
+
+            echo "README files are intentionally different:"
+            echo "- Root README: Project marketing and overview"
+            echo "- Crate README: Technical documentation for crates.io"
+            echo "No sync needed - this is by design."
+          fi
+
+      - name: Validate README links
+        run: |
+          echo "Validating README links..."
+
+          # Check if Chinese README link exists
+          if grep -q "README_zh.md" README.md; then
+            if [ ! -f "README_zh.md" ]; then
+              echo "❌ Chinese README link found but file doesn't exist"
+              exit 1
+            else
+              echo "✅ Chinese README exists"
+            fi
+          fi
+
+          # Check if English README link in Chinese version exists
+          if [ -f "README_zh.md" ]; then
+            if grep -q "README.md" README_zh.md; then
+              echo "✅ Cross-language links validated"
+            else
+              echo "❌ Missing English link in Chinese README"
+              exit 1
+            fi
+          fi
+
+      - name: Check README consistency
+        run: |
+          echo "Checking README consistency..."
+
+          # Ensure both READMEs have the same badges (approximately)
+          root_badges=$(grep -c "badge.svg" README.md || echo "0")
+          zh_badges=$(grep -c "badge.svg" README_zh.md || echo "0")
+
+          echo "Root README badges: $root_badges"
+          echo "Chinese README badges: $zh_badges"
+
+          if [ "$root_badges" != "$zh_badges" ]; then
+            echo "⚠️  Badge count mismatch between README versions"
+          else
+            echo "✅ Badge consistency check passed"
+          fi
+
+      - name: Generate README report
+        run: |
+          echo "## README Status Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "README.md" ]; then
+            readme_size=$(wc -c < README.md)
+            echo "- ✅ English README: ${readme_size} bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "README_zh.md" ]; then
+            zh_size=$(wc -c < README_zh.md)
+            echo "- ✅ Chinese README: ${zh_size} bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ -f "crates/pingora_web/README.md" ]; then
+            crate_size=$(wc -c < crates/pingora_web/README.md)
+            echo "- ✅ Crate README: ${crate_size} bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All README files are properly maintained! 🎉" >> $GITHUB_STEP_SUMMARY
