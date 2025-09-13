@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2024"
 description = "Minimal routing, middleware, and logging (with request ID) for Pingora-based servers."
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/zaijie1213/pingora_web"
+homepage = "https://github.com/zaijie1213/pingora_web"
+documentation = "https://docs.rs/pingora_web"
+readme = "README.md"
+keywords = ["pingora", "http", "middleware", "routing", "server"]
+categories = ["web-programming::http-server"]
 
 [dependencies]
 async-trait = "0.1"
