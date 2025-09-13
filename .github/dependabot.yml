@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Enable version updates for Cargo
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "zaijie1213"  # Replace with your GitHub username
+    assignees:
+      - "zaijie1213"  # Replace with your GitHub username
+    commit-message:
+      prefix: "cargo"
+      include: "scope"
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "zaijie1213"  # Replace with your GitHub username
+    assignees:
+      - "zaijie1213"  # Replace with your GitHub username
+    commit-message:
+      prefix: "ci"
+      include: "scope"

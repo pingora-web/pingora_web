@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --all-features --workspace
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build release
+        run: cargo build --release --all-features
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+
+  publish-crate:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish pingora_web to crates.io
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --package pingora_web
+
+      - name: Wait for crates.io propagation
+        run: sleep 60
+
+      - name: Verify publication
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Verifying version $VERSION is available on crates.io"
+
+          # Try to fetch the published version
+          for i in {1..10}; do
+            if curl -s "https://crates.io/api/v1/crates/pingora_web/$VERSION" | grep -q "\"num\":\"$VERSION\""; then
+              echo "✅ Version $VERSION successfully published to crates.io"
+              exit 0
+            fi
+            echo "⏳ Attempt $i: Version not yet available, waiting..."
+            sleep 30
+          done
+
+          echo "❌ Failed to verify publication after 10 attempts"
+          exit 1

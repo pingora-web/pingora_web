@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 pingora_web = { path = "../../crates/pingora_web" }
-pingora = { version = "0.6", features = ["lb"] }
+pingora = { version = "0.6" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 async-trait = "0.1"
 tracing = "0.1"

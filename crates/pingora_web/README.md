@@ -13,7 +13,7 @@ Minimal routing, middleware, and structured logging (with request ID) for server
 ```toml
 [dependencies]
 pingora_web = "0.1"
-pingora = { version = "0.6", features = ["lb"] }
+pingora = { version = "0.6" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -54,6 +54,53 @@ fn main() {
     service.add_tcp("0.0.0.0:8080");
     server.add_services(vec![Box::new(service)]);
     server.run_forever().unwrap();
+}
+```
+
+## JSON Response Example
+
+```rust
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct ApiResponse {
+    success: bool,
+    message: String,
+    data: Vec<String>,
+}
+
+struct JsonHandler;
+#[async_trait]
+impl Handler for JsonHandler {
+    async fn handle(&self, _req: Request) -> Response {
+        let response = ApiResponse {
+            success: true,
+            message: "Hello from JSON API".to_string(),
+            data: vec!["item1".to_string(), "item2".to_string()],
+        };
+        Response::json(200, response)
+    }
+}
+
+// Add to router:
+// router.get("/api/data", Arc::new(JsonHandler));
+```
+
+## Static File Serving Example
+
+```rust
+use pingora_web::utils::ServeDir;
+
+fn setup_router() -> Router {
+    let mut router = Router::new();
+
+    // Serve static files from ./public directory
+    router.get("/static/{path}", Arc::new(ServeDir::new("./public")));
+
+    // Or serve from current directory
+    router.get("/assets/{path}", Arc::new(ServeDir::new(".")));
+
+    router
 }
 ```
 
