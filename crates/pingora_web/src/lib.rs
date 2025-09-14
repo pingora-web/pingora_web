@@ -309,7 +309,7 @@ impl HttpServerApp for App {
             match res.body {
                 response::Body::Bytes(bytes) => {
                     // Apply response body filter from modules
-                    let mut body_opt = Some(bytes.into());
+                    let mut body_opt = Some(bytes);
                     if module_ctx
                         .response_body_filter(&mut body_opt, true)
                         .is_err()
@@ -330,26 +330,23 @@ impl HttpServerApp for App {
                         {
                             break;
                         }
-                        if let Some(filtered_chunk) = body_opt {
-                            if http
+                        if let Some(filtered_chunk) = body_opt
+                            && http
                                 .write_response_body(filtered_chunk, false)
                                 .await
                                 .is_err()
                             {
                                 break;
                             }
-                        }
                     }
                     // Final empty chunk to signal end
                     let mut final_body = Some(bytes::Bytes::new());
                     if module_ctx
                         .response_body_filter(&mut final_body, true)
                         .is_ok()
-                    {
-                        if let Some(final_chunk) = final_body {
+                        && let Some(final_chunk) = final_body {
                             let _ = http.write_response_body(final_chunk, true).await;
                         }
-                    }
                 }
             }
         }

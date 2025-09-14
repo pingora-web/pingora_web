@@ -173,7 +173,7 @@ impl Request {
         }
 
         let body_str =
-            std::str::from_utf8(self.body()).map_err(|e| FormParseError::Utf8Error(e))?;
+            std::str::from_utf8(self.body()).map_err(FormParseError::Utf8Error)?;
 
         serde_urlencoded::from_str(body_str)
             .map_err(|e| FormParseError::DeserializeError(e.to_string()))
