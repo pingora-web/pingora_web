@@ -2,13 +2,13 @@ use async_trait::async_trait;
 // use pingora::apps::http_app::HttpServer; // not needed when passing App directly
 use bytes::Bytes;
 use futures::{StreamExt, stream};
-use pingora_web::StatusCode;
 use pingora::server::Server;
 use pingora::services::listening::Service;
+use pingora_web::StatusCode;
 use pingora_web::utils::ServeDir;
 use pingora_web::{
-    App, Handler, LimitsConfig, LimitsMiddleware,
-    PanicRecoveryMiddleware, Request, Response, Router, TracingMiddleware, ResponseCompressionBuilder,
+    App, Handler, LimitsConfig, LimitsMiddleware, PanicRecoveryMiddleware, Request, Response,
+    ResponseCompressionBuilder, Router, TracingMiddleware,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -143,7 +143,8 @@ impl Handler for GeneratedStreamHandler {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             Some((Bytes::from(format!("chunk-{}\n", i).into_bytes()), ()))
         });
-        Response::stream(StatusCode::OK, s.boxed()).header("content-type", "text/plain; charset=utf-8")
+        Response::stream(StatusCode::OK, s.boxed())
+            .header("content-type", "text/plain; charset=utf-8")
     }
 }
 
@@ -175,20 +176,26 @@ fn main() {
     });
 
     router.get_fn("/api/status", |_req| {
-        Response::json(StatusCode::OK, serde_json::json!({
-            "status": "ok",
-            "message": "Server is running",
-            "uptime": "N/A"
-        }))
+        Response::json(
+            StatusCode::OK,
+            serde_json::json!({
+                "status": "ok",
+                "message": "Server is running",
+                "uptime": "N/A"
+            }),
+        )
     });
 
     router.post_fn("/api/echo", |req| {
         // 简单的 echo 服务
         let body_str = String::from_utf8_lossy(req.body());
-        Response::json(StatusCode::OK, serde_json::json!({
-            "received": body_str,
-            "length": req.body().len()
-        }))
+        Response::json(
+            StatusCode::OK,
+            serde_json::json!({
+                "received": body_str,
+                "length": req.body().len()
+            }),
+        )
     });
 
     router.get("/assets/{path}", Arc::new(ServeDir::new(".")));

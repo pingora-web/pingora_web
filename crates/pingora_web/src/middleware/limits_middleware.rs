@@ -107,7 +107,10 @@ impl LimitsMiddleware {
                 req.headers().len(),
                 self.config.max_headers
             );
-            return Some(Response::text(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE, "Request Header Fields Too Large"));
+            return Some(Response::text(
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+                "Request Header Fields Too Large",
+            ));
         }
 
         // Check individual header sizes
@@ -121,7 +124,10 @@ impl LimitsMiddleware {
                     value_len,
                     self.config.max_header_size
                 );
-                return Some(Response::text(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE, "Request Header Fields Too Large"));
+                return Some(Response::text(
+                    StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+                    "Request Header Fields Too Large",
+                ));
             }
         }
 
@@ -132,7 +138,10 @@ impl LimitsMiddleware {
                 req.body().len(),
                 self.config.max_body_size
             );
-            return Some(Response::text(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large"));
+            return Some(Response::text(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Payload Too Large",
+            ));
         }
 
         None

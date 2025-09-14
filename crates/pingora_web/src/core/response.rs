@@ -174,47 +174,66 @@ impl Response {
 
     /// 400 Bad Request with error message
     pub fn bad_request<S: Into<String>>(message: S) -> Self {
-        Self::json(StatusCode::BAD_REQUEST, serde_json::json!({
-            "error": "Bad Request",
-            "message": message.into()
-        }))
+        Self::json(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({
+                "error": "Bad Request",
+                "message": message.into()
+            }),
+        )
     }
 
     /// 401 Unauthorized with error message
     pub fn unauthorized<S: Into<String>>(message: S) -> Self {
-        Self::json(StatusCode::UNAUTHORIZED, serde_json::json!({
-            "error": "Unauthorized",
-            "message": message.into()
-        }))
+        Self::json(
+            StatusCode::UNAUTHORIZED,
+            serde_json::json!({
+                "error": "Unauthorized",
+                "message": message.into()
+            }),
+        )
     }
 
     /// 403 Forbidden with error message
     pub fn forbidden<S: Into<String>>(message: S) -> Self {
-        Self::json(StatusCode::FORBIDDEN, serde_json::json!({
-            "error": "Forbidden",
-            "message": message.into()
-        }))
+        Self::json(
+            StatusCode::FORBIDDEN,
+            serde_json::json!({
+                "error": "Forbidden",
+                "message": message.into()
+            }),
+        )
     }
 
     /// 404 Not Found with error message
     pub fn not_found<S: Into<String>>(message: S) -> Self {
-        Self::json(StatusCode::NOT_FOUND, serde_json::json!({
-            "error": "Not Found",
-            "message": message.into()
-        }))
+        Self::json(
+            StatusCode::NOT_FOUND,
+            serde_json::json!({
+                "error": "Not Found",
+                "message": message.into()
+            }),
+        )
     }
 
     /// 500 Internal Server Error with error message
     pub fn internal_error<S: Into<String>>(message: S) -> Self {
-        Self::json(StatusCode::INTERNAL_SERVER_ERROR, serde_json::json!({
-            "error": "Internal Server Error",
-            "message": message.into()
-        }))
+        Self::json(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            serde_json::json!({
+                "error": "Internal Server Error",
+                "message": message.into()
+            }),
+        )
     }
 
     /// 301/302 Redirect to URL
     pub fn redirect<S: Into<String>>(url: S, permanent: bool) -> Self {
-        let status = if permanent { StatusCode::MOVED_PERMANENTLY } else { StatusCode::FOUND };
+        let status = if permanent {
+            StatusCode::MOVED_PERMANENTLY
+        } else {
+            StatusCode::FOUND
+        };
         Self::empty(status).header("Location", url.into())
     }
 

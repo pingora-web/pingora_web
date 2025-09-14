@@ -8,8 +8,8 @@ pub use core::*;
 pub use http::StatusCode;
 pub use logging::*;
 pub use middleware::*;
-pub use pingora_core::modules::http::{HttpModule, ModuleBuilder};
 pub use pingora_core::modules::http::compression::ResponseCompressionBuilder;
+pub use pingora_core::modules::http::{HttpModule, ModuleBuilder};
 
 use async_trait::async_trait;
 use http::Response as HttpResponse;
@@ -114,7 +114,10 @@ impl App {
     /// server.add_service(service);
     /// server.run_forever();
     /// ```
-    pub fn to_service(self, name: impl Into<String>) -> pingora::services::listening::Service<Self> {
+    pub fn to_service(
+        self,
+        name: impl Into<String>,
+    ) -> pingora::services::listening::Service<Self> {
         use pingora::services::listening::Service;
         Service::new(name.into(), self)
     }
@@ -150,7 +153,8 @@ impl App {
                     // If a different method matches this path, return 405 with Allow header
                     if !allowed.is_empty() {
                         let allow_header = allowed.join(", ");
-                        let mut res = Response::text(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
+                        let mut res =
+                            Response::text(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
                         res.headers.insert(
                             http::header::ALLOW,
                             http::HeaderValue::from_str(&allow_header).unwrap(),
@@ -232,7 +236,11 @@ impl HttpServerApp for App {
         let mut module_ctx = self.http_modules.build_ctx();
 
         // Apply request header filter from modules
-        if module_ctx.request_header_filter(http.req_header_mut()).await.is_err() {
+        if module_ctx
+            .request_header_filter(http.req_header_mut())
+            .await
+            .is_err()
+        {
             return None;
         }
 
@@ -280,7 +288,11 @@ impl HttpServerApp for App {
 
         // Apply response header filter from modules
         let is_body_empty = matches!(res.body, response::Body::Bytes(ref b) if b.is_empty());
-        if module_ctx.response_header_filter(&mut resp_header, is_body_empty).await.is_err() {
+        if module_ctx
+            .response_header_filter(&mut resp_header, is_body_empty)
+            .await
+            .is_err()
+        {
             return None;
         }
 
@@ -298,7 +310,10 @@ impl HttpServerApp for App {
                 response::Body::Bytes(bytes) => {
                     // Apply response body filter from modules
                     let mut body_opt = Some(bytes.into());
-                    if module_ctx.response_body_filter(&mut body_opt, true).is_err() {
+                    if module_ctx
+                        .response_body_filter(&mut body_opt, true)
+                        .is_err()
+                    {
                         return None;
                     }
                     if let Some(filtered_body) = body_opt {
@@ -309,18 +324,28 @@ impl HttpServerApp for App {
                     while let Some(chunk) = s.next().await {
                         // Apply body filter to each chunk
                         let mut body_opt = Some(chunk);
-                        if module_ctx.response_body_filter(&mut body_opt, false).is_err() {
+                        if module_ctx
+                            .response_body_filter(&mut body_opt, false)
+                            .is_err()
+                        {
                             break;
                         }
                         if let Some(filtered_chunk) = body_opt {
-                            if http.write_response_body(filtered_chunk, false).await.is_err() {
+                            if http
+                                .write_response_body(filtered_chunk, false)
+                                .await
+                                .is_err()
+                            {
                                 break;
                             }
                         }
                     }
                     // Final empty chunk to signal end
                     let mut final_body = Some(bytes::Bytes::new());
-                    if module_ctx.response_body_filter(&mut final_body, true).is_ok() {
+                    if module_ctx
+                        .response_body_filter(&mut final_body, true)
+                        .is_ok()
+                    {
                         if let Some(final_chunk) = final_body {
                             let _ = http.write_response_body(final_chunk, true).await;
                         }

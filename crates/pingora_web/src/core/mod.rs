@@ -6,6 +6,6 @@ pub mod router;
 
 pub use data::AppData;
 pub use http::Method; // Use standard HTTP Method
-pub use request::{Request, FormParseError};
+pub use request::{FormParseError, Request};
 pub use response::Response;
 pub use router::{Handler, Router, SimpleClosure};

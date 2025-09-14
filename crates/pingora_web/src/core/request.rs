@@ -162,7 +162,8 @@ impl Request {
     where
         T: DeserializeOwned,
     {
-        let content_type = self.headers()
+        let content_type = self
+            .headers()
             .get("content-type")
             .and_then(|ct| ct.to_str().ok())
             .unwrap_or("");
@@ -171,13 +172,12 @@ impl Request {
             return Err(FormParseError::InvalidContentType(content_type.to_string()));
         }
 
-        let body_str = std::str::from_utf8(self.body())
-            .map_err(|e| FormParseError::Utf8Error(e))?;
+        let body_str =
+            std::str::from_utf8(self.body()).map_err(|e| FormParseError::Utf8Error(e))?;
 
         serde_urlencoded::from_str(body_str)
             .map_err(|e| FormParseError::DeserializeError(e.to_string()))
     }
-
 }
 
 /// Form data parsing errors
@@ -247,7 +247,6 @@ mod tests {
             _ => panic!("expected InvalidContentType error"),
         }
     }
-
 
     #[test]
     fn test_urlencoded_special_characters() {
