@@ -5,7 +5,7 @@
 [![Documentation](https://docs.rs/pingora_web/badge.svg)](https://docs.rs/pingora_web)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Downloads](https://img.shields.io/crates/d/pingora_web.svg)](https://crates.io/crates/pingora_web)
-[![Stars](https://img.shields.io/github/stars/zaijie1213/pingora_web.svg)](https://github.com/pingora-web/pingora_web)
+[![Stars](https://img.shields.io/github/stars/pingora-web/pingora_web.svg)](https://github.com/pingora-web/pingora_web)
 
 **🔥 Fast setup | Built on Pingora | Beginner friendly** 🦀
 

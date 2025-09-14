@@ -5,7 +5,7 @@
 [![Documentation](https://docs.rs/pingora_web/badge.svg)](https://docs.rs/pingora_web)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Downloads](https://img.shields.io/crates/d/pingora_web.svg)](https://crates.io/crates/pingora_web)
-[![Stars](https://img.shields.io/github/stars/zaijie1213/pingora_web.svg)](https://github.com/pingora-web/pingora_web)
+[![Stars](https://img.shields.io/github/stars/pingora-web/pingora_web.svg)](https://github.com/pingora-web/pingora_web)
 
 **🔥 快速上手 | 基于 Pingora | 新手友好** 🦀
 
@@ -324,7 +324,7 @@ cargo run --example pingora_example
 ## 🔗 相关链接
 
 - **文档**: [docs.rs/pingora_web](https://docs.rs/pingora_web)
-- **源码**: [github.com/zaijie1213/pingora_web](https://github.com/pingora-web/pingora_web)
+- **源码**: [github.com/pingora-web/pingora_web](https://github.com/pingora-web/pingora_web)
 - **包管理**: [crates.io/crates/pingora_web](https://crates.io/crates/pingora_web)
 - **问题反馈**: [GitHub Issues](https://github.com/pingora-web/pingora_web/issues)
 
