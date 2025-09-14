@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use crate::core::data::AppData;
 use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, Method, Uri};
+use serde::de::DeserializeOwned;
 
 #[derive(Debug)]
 pub struct Request {
@@ -153,4 +154,109 @@ impl Request {
     }
 
     // (removed deprecated aliases)
+
+    // --- Form data parsing ---
+
+    /// Parse form data as application/x-www-form-urlencoded
+    pub fn parse_form<T>(&self) -> Result<T, FormParseError>
+    where
+        T: DeserializeOwned,
+    {
+        let content_type = self.headers()
+            .get("content-type")
+            .and_then(|ct| ct.to_str().ok())
+            .unwrap_or("");
+
+        if !content_type.starts_with("application/x-www-form-urlencoded") {
+            return Err(FormParseError::InvalidContentType(content_type.to_string()));
+        }
+
+        let body_str = std::str::from_utf8(self.body())
+            .map_err(|e| FormParseError::Utf8Error(e))?;
+
+        serde_urlencoded::from_str(body_str)
+            .map_err(|e| FormParseError::DeserializeError(e.to_string()))
+    }
+
+}
+
+/// Form data parsing errors
+#[derive(Debug)]
+pub enum FormParseError {
+    InvalidContentType(String),
+    Utf8Error(std::str::Utf8Error),
+    DeserializeError(String),
+}
+
+impl std::fmt::Display for FormParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FormParseError::InvalidContentType(ct) => write!(f, "Invalid content type: {}", ct),
+            FormParseError::Utf8Error(e) => write!(f, "UTF-8 error: {}", e),
+            FormParseError::DeserializeError(e) => write!(f, "Deserialization error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for FormParseError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Deserialize;
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    struct LoginForm {
+        username: String,
+        password: String,
+    }
+
+    #[test]
+    fn test_parse_form_urlencoded() {
+        let req = Request::new(Method::POST, "/login")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .with_body("username=alice&password=secret123");
+
+        let form: LoginForm = req.parse_form().expect("parse form");
+        assert_eq!(form.username, "alice");
+        assert_eq!(form.password, "secret123");
+    }
+
+    #[test]
+    fn test_parse_form_simple() {
+        let req = Request::new(Method::POST, "/form")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .with_body("name=John&email=john@example.com&age=30");
+
+        let form: HashMap<String, String> = req.parse_form().expect("parse form");
+        assert_eq!(form.get("name"), Some(&"John".to_string()));
+        assert_eq!(form.get("email"), Some(&"john@example.com".to_string()));
+        assert_eq!(form.get("age"), Some(&"30".to_string()));
+    }
+
+    #[test]
+    fn test_parse_form_invalid_content_type() {
+        let req = Request::new(Method::POST, "/login")
+            .header("content-type", "application/json")
+            .with_body(r#"{"username": "alice"}"#);
+
+        let result: Result<LoginForm, _> = req.parse_form();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FormParseError::InvalidContentType(ct) => assert_eq!(ct, "application/json"),
+            _ => panic!("expected InvalidContentType error"),
+        }
+    }
+
+
+    #[test]
+    fn test_urlencoded_special_characters() {
+        let req = Request::new(Method::POST, "/form")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .with_body("message=Hello%20World%21&symbol=%26%3D%3F");
+
+        let form: HashMap<String, String> = req.parse_form().expect("parse form");
+        assert_eq!(form.get("message"), Some(&"Hello World!".to_string()));
+        assert_eq!(form.get("symbol"), Some(&"&=?".to_string()));
+    }
 }

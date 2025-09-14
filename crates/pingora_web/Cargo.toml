@@ -1,6 +1,6 @@
 [package]
 name = "pingora_web"
-version = "0.1.5"
+version = "0.1.7"
 edition = "2024"
 description = "Minimal routing, middleware, and logging (with request ID) for Pingora-based servers."
 license = "MIT OR Apache-2.0"
@@ -22,7 +22,7 @@ tracing = "0.1"
 mime_guess = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-flate2 = "1"
+serde_urlencoded = "0.7"
 
 [dependencies.pingora]
 version = "0.6"

@@ -52,12 +52,7 @@ impl Middleware for TracingMiddleware {
         // Execute the rest of the middleware chain within this span
         async move {
             // Log request start
-            info!(
-                method = method.as_str(),
-                path = path,
-                request_id = request_id.as_str(),
-                "Request started"
-            );
+            info!("Request started");
 
             let start_time = std::time::Instant::now();
 
@@ -70,11 +65,7 @@ impl Middleware for TracingMiddleware {
             span_for_record.record("latency_ms", elapsed_ms);
 
             // Log the request completion
-            info!(
-                status = res.status.as_u16(),
-                latency_ms = elapsed_ms,
-                "Request completed"
-            );
+            info!("Request completed");
 
             res
         }
