@@ -3,13 +3,13 @@ use futures::stream::BoxStream;
 use http::{HeaderMap, HeaderValue, StatusCode};
 use tokio::io::AsyncReadExt;
 
-pub struct Response {
+pub struct PingoraWebHttpResponse {
     pub status: StatusCode,
     pub headers: HeaderMap,
     pub body: Body,
 }
 
-impl Response {
+impl PingoraWebHttpResponse {
     pub fn new(status: StatusCode) -> Self {
         Self {
             status,
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn json_builds_response() {
         let v = json!({"a": 1, "b": "x"});
-        let res = Response::json(StatusCode::OK, &v);
+        let res = PingoraWebHttpResponse::json(StatusCode::OK, &v);
         assert_eq!(res.status.as_u16(), 200);
         assert_eq!(
             res.headers
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn html_and_empty_and_bytes() {
-        let res = Response::html(StatusCode::OK, "<h1>ok</h1>");
+        let res = PingoraWebHttpResponse::html(StatusCode::OK, "<h1>ok</h1>");
         assert_eq!(res.status.as_u16(), 200);
         assert_eq!(
             res.headers
@@ -288,12 +288,12 @@ mod tests {
         // content-length should be set by App.handle(), not here
         assert!(!res.headers.contains_key(http::header::CONTENT_LENGTH));
 
-        let res = Response::empty(StatusCode::NO_CONTENT);
+        let res = PingoraWebHttpResponse::empty(StatusCode::NO_CONTENT);
         assert_eq!(res.status.as_u16(), 204);
         // content-length should be set by App.handle(), not here
         assert!(!res.headers.contains_key(http::header::CONTENT_LENGTH));
 
-        let res = Response::bytes(StatusCode::CREATED, Bytes::from(vec![1, 2, 3]));
+        let res = PingoraWebHttpResponse::bytes(StatusCode::CREATED, Bytes::from(vec![1, 2, 3]));
         assert_eq!(res.status.as_u16(), 201);
         // content-length should be set by App.handle(), not here
         assert!(!res.headers.contains_key("content-length"));
@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn response_constructors() {
         // Test that constructors create proper bodies without setting content-length
-        let res = Response::text(StatusCode::OK, "hello world");
+        let res = PingoraWebHttpResponse::text(StatusCode::OK, "hello world");
         assert_eq!(
             res.headers.get(http::header::CONTENT_TYPE).unwrap(),
             &HeaderValue::from_static("text/plain; charset=utf-8")
@@ -320,7 +320,7 @@ mod tests {
             Bytes::from_static(b"chunk1"),
             Bytes::from_static(b"chunk2"),
         ]);
-        let res = Response::stream(StatusCode::OK, stream.boxed());
+        let res = PingoraWebHttpResponse::stream(StatusCode::OK, stream.boxed());
         // Neither content-length nor transfer-encoding should be set by constructor
         assert!(!res.headers.contains_key(http::header::CONTENT_LENGTH));
         assert!(!res.headers.contains_key(http::header::TRANSFER_ENCODING));
@@ -329,7 +329,7 @@ mod tests {
     #[test]
     fn manual_headers_not_overridden() {
         // Test that manually set headers are preserved
-        let mut res = Response::text(StatusCode::OK, "hello");
+        let mut res = PingoraWebHttpResponse::text(StatusCode::OK, "hello");
         res.set_header("content-length", "999");
         // Manual content-length should be preserved
         assert_eq!(
@@ -341,27 +341,27 @@ mod tests {
     #[test]
     fn convenience_methods() {
         // Test convenience methods
-        let res = Response::ok("Success");
+        let res = PingoraWebHttpResponse::ok("Success");
         assert_eq!(res.status.as_u16(), 200);
 
-        let res = Response::no_content();
+        let res = PingoraWebHttpResponse::no_content();
         assert_eq!(res.status.as_u16(), 204);
 
-        let res = Response::not_found("Resource not found");
+        let res = PingoraWebHttpResponse::not_found("Resource not found");
         assert_eq!(res.status.as_u16(), 404);
         assert_eq!(
             res.headers.get(http::header::CONTENT_TYPE).unwrap(),
             &HeaderValue::from_static("application/json")
         );
 
-        let res = Response::redirect_to("/login");
+        let res = PingoraWebHttpResponse::redirect_to("/login");
         assert_eq!(res.status.as_u16(), 302);
         assert_eq!(
             res.headers.get("location").unwrap(),
             &HeaderValue::from_static("/login")
         );
 
-        let res = Response::redirect_permanent("/new-url");
+        let res = PingoraWebHttpResponse::redirect_permanent("/new-url");
         assert_eq!(res.status.as_u16(), 301);
     }
 }

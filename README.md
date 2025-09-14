@@ -58,28 +58,32 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ### 3. Hello World (5 lines - like Express/Gin)
 
 ```rust
-use pingora_web::{App, Response, Router, StatusCode};
+use pingora_web::{App, StatusCode, PingoraWebHttpResponse, WebError, PingoraHttpRequest};
 
 fn main() {
-    let mut router = Router::new();
-    router.get_fn("/", |_req| Response::text(StatusCode::OK, "Hello World!"));
-    App::new(router).listen("0.0.0.0:8080").unwrap();
+    let mut app = App::default();
+    app.get_fn("/", |_req: PingoraHttpRequest| -> Result<PingoraWebHttpResponse, WebError> {
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, "Hello World!"))
+    });
+    app.listen("0.0.0.0:8080").unwrap();
 }
 ```
 
 ### 4. With Parameters (beginner-friendly)
 
 ```rust
-use pingora_web::{App, Response, Router, StatusCode};
+use pingora_web::{App, StatusCode, PingoraWebHttpResponse, WebError, PingoraHttpRequest};
 
 fn main() {
-    let mut router = Router::new();
-    router.get_fn("/", |_req| Response::text(StatusCode::OK, "Hello World!"));
-    router.get_fn("/hi/{name}", |req| {
-        let name = req.param("name").unwrap_or("world");
-        Response::text(StatusCode::OK, format!("Hello {}", name))
+    let mut app = App::default();
+    app.get_fn("/", |_req: PingoraHttpRequest| -> Result<PingoraWebHttpResponse, WebError> {
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, "Hello World!"))
     });
-    App::new(router).listen("0.0.0.0:8080").unwrap();
+    app.get_fn("/hi/{name}", |req: PingoraHttpRequest| -> Result<PingoraWebHttpResponse, WebError> {
+        let name = req.param("name").unwrap_or("world");
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, format!("Hello {}", name)))
+    });
+    app.listen("0.0.0.0:8080").unwrap();
 }
 ```
 
@@ -87,15 +91,15 @@ fn main() {
 
 ```rust
 use async_trait::async_trait;
-use pingora_web::{App, Handler, Request, Response, Router, StatusCode, TracingMiddleware, ResponseCompressionBuilder};
+use pingora_web::{App, Handler, StatusCode, TracingMiddleware, ResponseCompressionBuilder, WebError, PingoraHttpRequest, PingoraWebHttpResponse};
 use std::sync::Arc;
 
 struct Hello;
 #[async_trait]
 impl Handler for Hello {
-    async fn handle(&self, req: Request) -> Response {
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         let name = req.param("name").unwrap_or("world");
-        Response::text(StatusCode::OK, format!("Hello {}", name))
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, format!("Hello {}", name)))
     }
 }
 
@@ -104,10 +108,8 @@ fn main() {
         .with_env_filter("info")
         .init();
 
-    let mut router = Router::new();
-    router.get("/hi/{name}", Arc::new(Hello));
-
-    let mut app = App::new(router);
+    let mut app = App::default();
+    app.get("/hi/{name}", Arc::new(Hello));
     app.use_middleware(TracingMiddleware::new());
     app.add_http_module(ResponseCompressionBuilder::enable(6));
 
@@ -128,23 +130,23 @@ If you need more control over the server configuration:
 
 ```rust
 use async_trait::async_trait;
-use pingora_web::{App, Handler, Request, Response, Router, StatusCode};
+use pingora_web::{App, Handler, StatusCode, WebError, PingoraHttpRequest, PingoraWebHttpResponse};
 use pingora::server::Server;
 use std::sync::Arc;
 
 struct Hello;
 #[async_trait]
 impl Handler for Hello {
-    async fn handle(&self, req: Request) -> Response {
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         let name = req.param("name").unwrap_or("world");
-        Response::text(StatusCode::OK, format!("Hello {}", name))
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, format!("Hello {}", name)))
     }
 }
 
 fn main() {
-    let mut router = Router::new();
-    router.get("/hi/{name}", Arc::new(Hello));
-    let app = App::new(router);
+    let mut app = App::default();
+    app.get("/hi/{name}", Arc::new(Hello));
+    let app = app;
 
     // Advanced: Convert to service for more control
     let mut service = app.to_service("my-web-app");
@@ -175,7 +177,7 @@ fn main() {
 Building REST APIs is the primary use case:
 
 ```rust
-use pingora_web::{App, Response, Router, StatusCode};
+use pingora_web::{App, StatusCode, PingoraWebHttpResponse, WebError, PingoraHttpRequest};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
@@ -192,21 +194,20 @@ struct CreateUser {
 }
 
 fn main() {
-    let mut router = Router::new();
-
+    let mut app = App::default();
     // GET /users/{id}
-    router.get_fn("/users/{id}", |req| {
+    app.get_fn("/users/{id}", |req: PingoraHttpRequest| -> Result<PingoraWebHttpResponse, WebError> {
         let user_id: u64 = req.param("id").unwrap_or("0").parse().unwrap_or(0);
         let user = User {
             id: user_id,
             name: "John Doe".to_string(),
             email: "john@example.com".to_string(),
         };
-        Response::json(StatusCode::OK, user)
+        Ok(PingoraWebHttpResponse::json(StatusCode::OK, user))
     });
 
     // POST /users
-    router.post_fn("/users", |req| {
+    app.post_fn("/users", |req: PingoraHttpRequest| -> Result<PingoraWebHttpResponse, WebError> {
         match serde_json::from_slice::<CreateUser>(req.body()) {
             Ok(create_user) => {
                 let user = User {
@@ -214,15 +215,15 @@ fn main() {
                     name: create_user.name,
                     email: create_user.email,
                 };
-                Response::json(StatusCode::CREATED, user)
+                Ok(PingoraWebHttpResponse::json(StatusCode::CREATED, user))
             }
-            Err(_) => Response::json(StatusCode::BAD_REQUEST, serde_json::json!({
+            Err(_) => Ok(PingoraWebHttpResponse::json(StatusCode::BAD_REQUEST, serde_json::json!({
                 "error": "Invalid JSON"
-            }))
+            })))
         }
     });
 
-    App::new(router).listen("0.0.0.0:8080").unwrap();
+    app.listen("0.0.0.0:8080").unwrap();
 }
 ```
 
@@ -231,19 +232,37 @@ fn main() {
 pingora_web integrates Pingora's high-performance HTTP modules for advanced functionality:
 
 ```rust
-use pingora_web::{App, Router, ResponseCompressionBuilder};
+use pingora_web::{App, ResponseCompressionBuilder};
 
 fn main() {
-    let mut router = Router::new();
+    let mut app = App::default();
     // ... add routes ...
-
-    let mut app = App::new(router);
 
     // Use Pingora's built-in compression module (level 6)
     app.add_http_module(ResponseCompressionBuilder::enable(6));
 
     // HTTP modules work at a lower level than middleware,
     // providing better performance for HTTP processing
+}
+```
+
+For other HTTP methods, use `add` with a method value:
+
+```rust
+use std::sync::Arc;
+use pingora_web::{App, Method, Handler, PingoraHttpRequest, PingoraWebHttpResponse, WebError};
+
+struct PutHandler;
+#[async_trait::async_trait]
+impl Handler for PutHandler {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
+        Ok(PingoraWebHttpResponse::no_content())
+    }
+}
+
+fn main() {
+    let mut app = App::default();
+    app.add(Method::PUT, "/resource/{id}", Arc::new(PutHandler));
 }
 ```
 
@@ -269,17 +288,19 @@ app.add_http_module(ResponseCompressionBuilder::enable(6));
 ### Static File Serving (Optional)
 
 ```rust
+use std::sync::Arc;
+use pingora_web::{App};
 use pingora_web::utils::ServeDir;
 
-fn setup_router() -> Router {
-    let mut router = Router::new();
-
+fn setup_app() -> App {
+    let mut app = App::default();
     // Serve static files from ./public directory
-    router.get("/static/{path}", Arc::new(ServeDir::new("./public")));
-
-    router
+    app.get("/static/{path}", Arc::new(ServeDir::new("./public")));
+    app
 }
 ```
+
+<!-- SSE section removed; feature not provided out-of-the-box -->
 
 ## Development
 

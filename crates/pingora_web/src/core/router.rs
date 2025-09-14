@@ -1,25 +1,26 @@
-use crate::core::{Method, Request, Response};
+use crate::core::{Method, PingoraHttpRequest, PingoraWebHttpResponse};
+use crate::error::WebError;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 #[async_trait]
 pub trait Handler: Send + Sync + 'static {
-    /// Process the request and return a response
-    async fn handle(&self, req: Request) -> Response;
+    /// Process the request and return a response or error
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError>;
 }
 
-/// Wrapper for simple closure-based handlers (sync)
-pub struct SimpleClosure<F>
+/// Wrapper for simple closure-based handlers that return Result
+pub struct ResultClosure<F>
 where
-    F: Fn(Request) -> Response + Send + Sync + 'static,
+    F: Fn(PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> + Send + Sync + 'static,
 {
     closure: F,
 }
 
-impl<F> SimpleClosure<F>
+impl<F> ResultClosure<F>
 where
-    F: Fn(Request) -> Response + Send + Sync + 'static,
+    F: Fn(PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> + Send + Sync + 'static,
 {
     pub fn new(closure: F) -> Self {
         Self { closure }
@@ -27,11 +28,11 @@ where
 }
 
 #[async_trait]
-impl<F> Handler for SimpleClosure<F>
+impl<F> Handler for ResultClosure<F>
 where
-    F: Fn(Request) -> Response + Send + Sync + 'static,
+    F: Fn(PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> + Send + Sync + 'static,
 {
-    async fn handle(&self, req: Request) -> Response {
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         (self.closure)(req)
     }
 }
@@ -57,54 +58,32 @@ impl Router {
         self.add(Method::GET, path, handler)
     }
 
-    /// Add a GET route with a simple closure handler
+    /// Add a GET route with a simple closure handler returning Result
     pub fn get_fn<S, F>(&mut self, path: S, handler: F)
     where
         S: Into<String>,
-        F: Fn(Request) -> Response + Send + Sync + 'static,
+        F: Fn(PingoraHttpRequest) -> Result<PingoraWebHttpResponse, crate::error::WebError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.add(Method::GET, path, Arc::new(SimpleClosure::new(handler)))
+        self.add(Method::GET, path, Arc::new(ResultClosure::new(handler)))
     }
 
     pub fn post<S: Into<String>>(&mut self, path: S, handler: Arc<dyn Handler>) {
         self.add(Method::POST, path, handler)
     }
 
-    /// Add a POST route with a simple closure handler
+    /// Add a POST route with a simple closure handler returning Result
     pub fn post_fn<S, F>(&mut self, path: S, handler: F)
     where
         S: Into<String>,
-        F: Fn(Request) -> Response + Send + Sync + 'static,
+        F: Fn(PingoraHttpRequest) -> Result<PingoraWebHttpResponse, crate::error::WebError>
+            + Send
+            + Sync
+            + 'static,
     {
-        self.add(Method::POST, path, Arc::new(SimpleClosure::new(handler)))
-    }
-
-    pub fn put<S: Into<String>>(&mut self, path: S, handler: Arc<dyn Handler>) {
-        self.add(Method::PUT, path, handler)
-    }
-
-    pub fn patch<S: Into<String>>(&mut self, path: S, handler: Arc<dyn Handler>) {
-        self.add(Method::PATCH, path, handler)
-    }
-
-    pub fn delete<S: Into<String>>(&mut self, path: S, handler: Arc<dyn Handler>) {
-        self.add(Method::DELETE, path, handler)
-    }
-
-    pub fn head<S: Into<String>>(&mut self, path: S, handler: Arc<dyn Handler>) {
-        self.add(Method::HEAD, path, handler)
-    }
-
-    pub fn options<S: Into<String>>(&mut self, path: S, handler: Arc<dyn Handler>) {
-        self.add(Method::OPTIONS, path, handler)
-    }
-
-    pub fn connect<S: Into<String>>(&mut self, path: S, handler: Arc<dyn Handler>) {
-        self.add(Method::CONNECT, path, handler)
-    }
-
-    pub fn trace<S: Into<String>>(&mut self, path: S, handler: Arc<dyn Handler>) {
-        self.add(Method::TRACE, path, handler)
+        self.add(Method::POST, path, Arc::new(ResultClosure::new(handler)))
     }
 }
 
@@ -167,9 +146,15 @@ mod tests {
 
     #[async_trait]
     impl Handler for HelloHandler {
-        async fn handle(&self, req: Request) -> Response {
+        async fn handle(
+            &self,
+            req: PingoraHttpRequest,
+        ) -> Result<PingoraWebHttpResponse, WebError> {
             let name = req.param("name").unwrap_or("world");
-            Response::text(StatusCode::OK, format!("hi {}", name))
+            Ok(PingoraWebHttpResponse::text(
+                StatusCode::OK,
+                format!("hi {}", name),
+            ))
         }
     }
 
@@ -179,8 +164,8 @@ mod tests {
         r.get("/hi/{name}", Arc::new(HelloHandler));
 
         let (h, params) = r.find(&Method::GET, "/hi/alice").expect("found");
-        let req = Request::new(Method::GET, "/hi/alice").with_params(params);
-        let res = h.handle(req).await;
+        let req = PingoraHttpRequest::new(Method::GET, "/hi/alice").with_params(params);
+        let res = h.handle(req).await.expect("handler success");
         match res.body {
             crate::core::response::Body::Bytes(b) => {
                 assert_eq!(std::str::from_utf8(&b).unwrap(), "hi alice");

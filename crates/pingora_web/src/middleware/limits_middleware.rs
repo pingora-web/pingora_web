@@ -5,7 +5,8 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 use super::Middleware;
-use crate::core::{Request, Response, router::Handler};
+use crate::core::{Handler, PingoraHttpRequest, PingoraWebHttpResponse};
+use crate::error::WebError;
 
 /// Configuration for timeout and size limits
 #[derive(Clone)]
@@ -89,7 +90,7 @@ impl LimitsMiddleware {
     }
 
     /// Validate request limits before processing
-    fn validate_request(&self, req: &Request) -> Option<Response> {
+    fn validate_request(&self, req: &PingoraHttpRequest) -> Option<PingoraWebHttpResponse> {
         // Check path length
         if req.path().len() > self.config.max_path_length {
             tracing::warn!(
@@ -97,7 +98,10 @@ impl LimitsMiddleware {
                 req.path().len(),
                 self.config.max_path_length
             );
-            return Some(Response::text(StatusCode::URI_TOO_LONG, "URI Too Long"));
+            return Some(PingoraWebHttpResponse::text(
+                StatusCode::URI_TOO_LONG,
+                "URI Too Long",
+            ));
         }
 
         // Check number of headers
@@ -107,7 +111,7 @@ impl LimitsMiddleware {
                 req.headers().len(),
                 self.config.max_headers
             );
-            return Some(Response::text(
+            return Some(PingoraWebHttpResponse::text(
                 StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
                 "Request Header Fields Too Large",
             ));
@@ -124,7 +128,7 @@ impl LimitsMiddleware {
                     value_len,
                     self.config.max_header_size
                 );
-                return Some(Response::text(
+                return Some(PingoraWebHttpResponse::text(
                     StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
                     "Request Header Fields Too Large",
                 ));
@@ -138,7 +142,7 @@ impl LimitsMiddleware {
                 req.body().len(),
                 self.config.max_body_size
             );
-            return Some(Response::text(
+            return Some(PingoraWebHttpResponse::text(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "Payload Too Large",
             ));
@@ -156,10 +160,14 @@ impl Default for LimitsMiddleware {
 
 #[async_trait]
 impl Middleware for LimitsMiddleware {
-    async fn handle(&self, req: Request, next: Arc<dyn Handler>) -> Response {
+    async fn handle(
+        &self,
+        req: PingoraHttpRequest,
+        next: Arc<dyn Handler>,
+    ) -> Result<PingoraWebHttpResponse, WebError> {
         // First validate request limits
         if let Some(error_response) = self.validate_request(&req) {
-            return error_response;
+            return Ok(error_response);
         }
 
         // Apply timeout to the entire request processing
@@ -170,7 +178,10 @@ impl Middleware for LimitsMiddleware {
                     "Request timeout after {}ms",
                     self.config.request_timeout.as_millis()
                 );
-                Response::text(StatusCode::REQUEST_TIMEOUT, "Request Timeout")
+                Ok(PingoraWebHttpResponse::text(
+                    StatusCode::REQUEST_TIMEOUT,
+                    "Request Timeout",
+                ))
             }
         }
     }
@@ -179,7 +190,7 @@ impl Middleware for LimitsMiddleware {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Method, Request};
+    use crate::core::{Method, PingoraHttpRequest};
 
     struct MockHandler {
         delay: Option<Duration>,
@@ -197,11 +208,14 @@ mod tests {
 
     #[async_trait]
     impl Handler for MockHandler {
-        async fn handle(&self, _req: Request) -> Response {
+        async fn handle(
+            &self,
+            _req: PingoraHttpRequest,
+        ) -> Result<PingoraWebHttpResponse, WebError> {
             if let Some(delay) = self.delay {
                 tokio::time::sleep(delay).await;
             }
-            Response::text(StatusCode::OK, "ok")
+            Ok(PingoraWebHttpResponse::text(StatusCode::OK, "ok"))
         }
     }
 
@@ -211,10 +225,10 @@ mod tests {
         let middleware = LimitsMiddleware::with_config(config);
 
         let handler = MockHandler::with_delay(Duration::from_millis(200));
-        let req = Request::new(Method::GET, "/test");
+        let req = PingoraHttpRequest::new(Method::GET, "/test");
 
         let response = middleware.handle(req, handler).await;
-        assert_eq!(response.status.as_u16(), 408);
+        assert_eq!(response.unwrap().status.as_u16(), 408);
     }
 
     #[tokio::test]
@@ -223,10 +237,10 @@ mod tests {
         let middleware = LimitsMiddleware::with_config(config);
 
         let handler = MockHandler::new();
-        let req = Request::new(Method::GET, "/very-long-path-that-exceeds-limit");
+        let req = PingoraHttpRequest::new(Method::GET, "/very-long-path-that-exceeds-limit");
 
         let response = middleware.handle(req, handler).await;
-        assert_eq!(response.status.as_u16(), 414);
+        assert_eq!(response.unwrap().status.as_u16(), 414);
     }
 
     #[tokio::test]
@@ -235,10 +249,11 @@ mod tests {
         let middleware = LimitsMiddleware::with_config(config);
 
         let handler = MockHandler::new();
-        let req = Request::new(Method::POST, "/test").with_body(b"too long body".to_vec());
+        let req =
+            PingoraHttpRequest::new(Method::POST, "/test").with_body(b"too long body".to_vec());
 
         let response = middleware.handle(req, handler).await;
-        assert_eq!(response.status.as_u16(), 413);
+        assert_eq!(response.unwrap().status.as_u16(), 413);
     }
 
     #[tokio::test]
@@ -247,7 +262,7 @@ mod tests {
         let middleware = LimitsMiddleware::with_config(config);
 
         let handler = MockHandler::new();
-        let mut req = Request::new(Method::GET, "/test");
+        let mut req = PingoraHttpRequest::new(Method::GET, "/test");
         req.headers_mut()
             .insert("header1", "value1".try_into().unwrap());
         req.headers_mut()
@@ -256,7 +271,7 @@ mod tests {
             .insert("header3", "value3".try_into().unwrap());
 
         let response = middleware.handle(req, handler).await;
-        assert_eq!(response.status.as_u16(), 431);
+        assert_eq!(response.unwrap().status.as_u16(), 431);
     }
 
     #[tokio::test]
@@ -265,12 +280,12 @@ mod tests {
         let middleware = LimitsMiddleware::with_config(config);
 
         let handler = MockHandler::new();
-        let mut req = Request::new(Method::GET, "/test");
+        let mut req = PingoraHttpRequest::new(Method::GET, "/test");
         req.headers_mut()
             .insert("x-long", "very-long-value".try_into().unwrap());
 
         let response = middleware.handle(req, handler).await;
-        assert_eq!(response.status.as_u16(), 431);
+        assert_eq!(response.unwrap().status.as_u16(), 431);
     }
 
     #[tokio::test]
@@ -279,9 +294,9 @@ mod tests {
         let middleware = LimitsMiddleware::with_config(config);
 
         let handler = MockHandler::new();
-        let req = Request::new(Method::GET, "/test").with_body(b"small".to_vec());
+        let req = PingoraHttpRequest::new(Method::GET, "/test").with_body(b"small".to_vec());
 
         let response = middleware.handle(req, handler).await;
-        assert_eq!(response.status.as_u16(), 200);
+        assert_eq!(response.unwrap().status.as_u16(), 200);
     }
 }

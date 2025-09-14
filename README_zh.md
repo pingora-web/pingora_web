@@ -51,28 +51,32 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ### 3. Hello World (5行代码 - 类似 Express/Gin)
 
 ```rust
-use pingora_web::{App, Response, Router, StatusCode};
+use pingora_web::{App, StatusCode, PingoraWebHttpResponse, WebError, PingoraHttpRequest};
 
 fn main() {
-    let mut router = Router::new();
-    router.get_fn("/", |_req| Response::text(StatusCode::OK, "你好世界!"));
-    App::new(router).listen("0.0.0.0:8080").unwrap();
+    let mut app = App::default();
+    app.get_fn("/", |_req: PingoraHttpRequest| -> Result<PingoraWebHttpResponse, WebError> {
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, "你好世界!"))
+    });
+    app.listen("0.0.0.0:8080").unwrap();
 }
 ```
 
 ### 4. 带参数路由 (新手友好)
 
 ```rust
-use pingora_web::{App, Response, Router, StatusCode};
+use pingora_web::{App, StatusCode, PingoraWebHttpResponse, WebError, PingoraHttpRequest};
 
 fn main() {
-    let mut router = Router::new();
-    router.get_fn("/", |_req| Response::text(StatusCode::OK, "你好世界!"));
-    router.get_fn("/hi/{name}", |req| {
-        let name = req.param("name").unwrap_or("世界");
-        Response::text(StatusCode::OK, format!("你好 {}", name))
+    let mut app = App::default();
+    app.get_fn("/", |_req: PingoraHttpRequest| -> Result<PingoraWebHttpResponse, WebError> {
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, "你好世界!"))
     });
-    App::new(router).listen("0.0.0.0:8080").unwrap();
+    app.get_fn("/hi/{name}", |req: PingoraHttpRequest| -> Result<PingoraWebHttpResponse, WebError> {
+        let name = req.param("name").unwrap_or("世界");
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, format!("你好 {}", name)))
+    });
+    app.listen("0.0.0.0:8080").unwrap();
 }
 ```
 
@@ -80,15 +84,15 @@ fn main() {
 
 ```rust
 use async_trait::async_trait;
-use pingora_web::{App, Handler, Request, Response, Router, StatusCode, TracingMiddleware, ResponseCompressionBuilder};
+use pingora_web::{App, Handler, StatusCode, TracingMiddleware, ResponseCompressionBuilder, WebError, PingoraHttpRequest, PingoraWebHttpResponse};
 use std::sync::Arc;
 
 struct Hello;
 #[async_trait]
 impl Handler for Hello {
-    async fn handle(&self, req: Request) -> Response {
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         let name = req.param("name").unwrap_or("世界");
-        Response::text(StatusCode::OK, format!("你好 {}", name))
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, format!("你好 {}", name)))
     }
 }
 
@@ -97,10 +101,8 @@ fn main() {
         .with_env_filter("info")
         .init();
 
-    let mut router = Router::new();
-    router.get("/hi/{name}", Arc::new(Hello));
-
-    let mut app = App::new(router);
+    let mut app = App::default();
+    app.get("/hi/{name}", Arc::new(Hello));
     app.use_middleware(TracingMiddleware::new());
     app.add_http_module(ResponseCompressionBuilder::enable(6));
 
@@ -122,23 +124,23 @@ cargo run
 
 ```rust
 use async_trait::async_trait;
-use pingora_web::{App, Handler, Request, Response, Router, StatusCode};
+use pingora_web::{App, Handler, StatusCode, WebError, PingoraHttpRequest, PingoraWebHttpResponse};
 use pingora::server::Server;
 use std::sync::Arc;
 
 struct Hello;
 #[async_trait]
 impl Handler for Hello {
-    async fn handle(&self, req: Request) -> Response {
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         let name = req.param("name").unwrap_or("世界");
-        Response::text(StatusCode::OK, format!("你好 {}", name))
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, format!("你好 {}", name)))
     }
 }
 
 fn main() {
-    let mut router = Router::new();
-    router.get("/hi/{name}", Arc::new(Hello));
-    let app = App::new(router);
+    let mut app = App::default();
+    app.get("/hi/{name}", Arc::new(Hello));
+    let app = app;
 
     // 高级：转换为服务以获得更多控制
     let mut service = app.to_service("my-web-app");
@@ -188,13 +190,13 @@ struct ApiResponse {
 struct JsonHandler;
 #[async_trait]
 impl Handler for JsonHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         let response = ApiResponse {
             success: true,
             message: "来自 JSON API 的问候".to_string(),
             data: vec!["项目1".to_string(), "项目2".to_string()],
         };
-        Response::json(StatusCode::OK, response)
+        Ok(PingoraWebHttpResponse::json(StatusCode::OK, response))
     }
 }
 
@@ -205,20 +207,41 @@ impl Handler for JsonHandler {
 ### 静态文件服务
 
 ```rust
+use std::sync::Arc;
+use pingora_web::App;
 use pingora_web::utils::ServeDir;
 
-fn setup_router() -> Router {
-    let mut router = Router::new();
-
+fn setup_app() -> App {
+    let mut app = App::default();
     // 从 ./public 目录提供静态文件
-    router.get("/static/{path}", Arc::new(ServeDir::new("./public")));
-
+    app.get("/static/{path}", Arc::new(ServeDir::new("./public")));
     // 或从当前目录提供
-    router.get("/assets/{path}", Arc::new(ServeDir::new(".")));
-
-    router
+    app.get("/assets/{path}", Arc::new(ServeDir::new(".")));
+    app
 }
 ```
+
+使用其他 HTTP 方法时，可通过 `add` 指定方法：
+
+```rust
+use std::sync::Arc;
+use pingora_web::{App, Method, Handler, PingoraHttpRequest, PingoraWebHttpResponse, WebError};
+
+struct PutHandler;
+#[async_trait::async_trait]
+impl Handler for PutHandler {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
+        Ok(PingoraWebHttpResponse::no_content())
+    }
+}
+
+fn main() {
+    let mut app = App::default();
+    app.add(Method::PUT, "/resource/{id}", Arc::new(PutHandler));
+}
+```
+
+<!-- 移除 SSE 章节：当前版本不提供内置 SSE 封装 -->
 
 ## 🔧 开发指南
 

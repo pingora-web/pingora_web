@@ -1,13 +1,18 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::core::{Request, Response, router::Handler};
+use crate::core::{Handler, PingoraHttpRequest, PingoraWebHttpResponse};
+use crate::error::WebError;
 
 /// Middleware trait for processing requests
 #[async_trait]
 pub trait Middleware: Send + Sync + 'static {
     /// Process the request, optionally calling the next handler
-    async fn handle(&self, req: Request, next: Arc<dyn Handler>) -> Response;
+    async fn handle(
+        &self,
+        req: PingoraHttpRequest,
+        next: Arc<dyn Handler>,
+    ) -> Result<PingoraWebHttpResponse, WebError>;
 }
 
 /// Wrapper that implements Handler for middleware composition
@@ -18,7 +23,7 @@ struct MiddlewareHandler {
 
 #[async_trait]
 impl Handler for MiddlewareHandler {
-    async fn handle(&self, req: Request) -> Response {
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         self.middleware.handle(req, Arc::clone(&self.next)).await
     }
 }

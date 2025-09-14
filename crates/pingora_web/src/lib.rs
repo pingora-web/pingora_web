@@ -1,16 +1,17 @@
 pub mod core;
-pub mod logging;
+pub mod error;
 pub mod middleware;
 pub mod utils;
 
 // Re-export commonly used types at the crate root
 pub use core::*;
+pub use error::{ResponseError, WebError};
 pub use http::StatusCode;
-pub use logging::*;
 pub use middleware::*;
 pub use pingora_core::modules::http::compression::ResponseCompressionBuilder;
 pub use pingora_core::modules::http::{HttpModule, ModuleBuilder};
 
+use crate::core::router::Router;
 use async_trait::async_trait;
 use http::Response as HttpResponse;
 use std::sync::Arc;
@@ -32,15 +33,19 @@ pub struct App {
 struct NotFoundHandler;
 
 #[async_trait]
-impl core::router::Handler for NotFoundHandler {
-    async fn handle(&self, _req: Request) -> Response {
-        Response::text(StatusCode::NOT_FOUND, "Not Found")
+impl core::Handler for NotFoundHandler {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
+        Ok(PingoraWebHttpResponse::text(
+            StatusCode::NOT_FOUND,
+            "Not Found",
+        ))
     }
 }
 
 impl App {
-    /// Single constructor: requires a Router; middlewares and shared data are optional to add later.
-    pub fn new(router: Router) -> Self {
+    /// Internal constructor with a Router. External users should use `App::default()`
+    /// and the route methods on `App`.
+    pub(crate) fn new(router: Router) -> Self {
         let mut s = Self {
             router,
             middlewares: Vec::new(),
@@ -52,6 +57,8 @@ impl App {
         s
     }
 
+    // Create an App with an empty Router via Default trait
+
     pub fn use_middleware<M: Middleware + 'static>(&mut self, middleware: M) {
         self.middlewares.push(Arc::new(middleware));
     }
@@ -59,6 +66,51 @@ impl App {
     /// Add HTTP module to this App
     pub fn add_http_module(&mut self, module: ModuleBuilder) {
         self.http_modules.add_module(module)
+    }
+
+    // ===== Route registration (App-level wrappers over Router) =====
+
+    pub fn add<S: Into<String>>(
+        &mut self,
+        method: core::Method,
+        path: S,
+        handler: Arc<dyn core::Handler>,
+    ) {
+        self.router.add(method, path, handler)
+    }
+
+    pub fn get<S: Into<String>>(&mut self, path: S, handler: Arc<dyn core::Handler>) {
+        self.router.get(path, handler)
+    }
+
+    pub fn post<S: Into<String>>(&mut self, path: S, handler: Arc<dyn core::Handler>) {
+        self.router.post(path, handler)
+    }
+
+    // For other HTTP methods, use `add(Method::X, ...)` for simplicity.
+
+    /// Closure handler: GET (returns Result)
+    pub fn get_fn<S, F>(&mut self, path: S, handler: F)
+    where
+        S: Into<String>,
+        F: Fn(PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.router.get_fn(path, handler)
+    }
+
+    /// Closure handler: POST (returns Result)
+    pub fn post_fn<S, F>(&mut self, path: S, handler: F)
+    where
+        S: Into<String>,
+        F: Fn(PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.router.post_fn(path, handler)
     }
 
     // --- App-level shared data API (single choice) ---
@@ -74,11 +126,10 @@ impl App {
     ///
     /// # Example
     /// ```no_run
-    /// use pingora_web::{App, Router};
-    ///
-    /// let router = Router::new();
-    /// let app = App::new(router);
-    /// app.listen("0.0.0.0:8080").unwrap();
+    /// use pingora_web::App;
+    /// let app = App::default();
+    /// // app.get("/", ...);
+    /// // app.listen("0.0.0.0:8080").unwrap();
     /// ```
     pub fn listen(self, addr: &str) -> Result<(), Box<dyn std::error::Error>> {
         use pingora::server::Server;
@@ -101,11 +152,10 @@ impl App {
     ///
     /// # Example
     /// ```no_run
-    /// use pingora_web::{App, Router};
+    /// use pingora_web::App;
     /// use pingora::server::Server;
     ///
-    /// let router = Router::new();
-    /// let app = App::new(router);
+    /// let app = App::default();
     /// let mut service = app.to_service("my-web-service");
     /// service.add_tcp("0.0.0.0:8080");
     /// service.add_tcp("0.0.0.0:8443"); // Add HTTPS later
@@ -123,7 +173,21 @@ impl App {
     }
 
     /// Handle a request end-to-end through middlewares and the router.
-    pub async fn handle(&self, req: Request) -> Response {
+    pub async fn handle(&self, mut req: PingoraHttpRequest) -> PingoraWebHttpResponse {
+        // Ensure a request-id exists early, even if middlewares fail later
+        let request_id = req
+            .headers()
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .map_or_else(crate::utils::request_id::generate, ToString::to_string);
+        // Put request-id into request headers if not already present
+        if !req.headers().contains_key("x-request-id") {
+            let _ = req.headers_mut().insert(
+                "x-request-id",
+                http::HeaderValue::from_str(&request_id).unwrap(),
+            );
+        }
         // Route lookup using references to avoid cloning
         let find_result = {
             let method = req.method();
@@ -142,7 +206,7 @@ impl App {
                         allowed.push("OPTIONS".to_string());
                         allowed.sort();
                         allowed.dedup();
-                        let mut res = Response::text(StatusCode::NO_CONTENT, "");
+                        let mut res = PingoraWebHttpResponse::text(StatusCode::NO_CONTENT, "");
                         let allow_header = allowed.join(", ");
                         res.headers.insert(
                             http::header::ALLOW,
@@ -153,8 +217,10 @@ impl App {
                     // If a different method matches this path, return 405 with Allow header
                     if !allowed.is_empty() {
                         let allow_header = allowed.join(", ");
-                        let mut res =
-                            Response::text(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed");
+                        let mut res = PingoraWebHttpResponse::text(
+                            StatusCode::METHOD_NOT_ALLOWED,
+                            "Method Not Allowed",
+                        );
                         res.headers.insert(
                             http::header::ALLOW,
                             http::HeaderValue::from_str(&allow_header).unwrap(),
@@ -162,7 +228,7 @@ impl App {
                         return res;
                     }
                     // Fallback 404 handler when no route matches
-                    let h: Arc<dyn core::router::Handler> = Arc::new(NotFoundHandler);
+                    let h: Arc<dyn Handler> = Arc::new(NotFoundHandler);
                     (h, Default::default())
                 }
             };
@@ -172,7 +238,20 @@ impl App {
 
         // Compose middlewares (onion model) around the route handler
         let entry = compose(&self.middlewares, handler);
-        let mut response = entry.handle(req_with_params).await;
+
+        // Handle the request and convert any errors to responses
+        let mut response = match entry.handle(req_with_params).await {
+            Ok(response) => response,
+            Err(error) => error.into_response(),
+        };
+
+        // Ensure response carries the request-id even on error paths
+        if !response.headers.contains_key("x-request-id") {
+            let _ = response.headers.insert(
+                "x-request-id",
+                http::HeaderValue::from_str(&request_id).unwrap(),
+            );
+        }
 
         // Automatically set content-length or transfer-encoding if not already set
         self.finalize_response_headers(&mut response);
@@ -180,7 +259,7 @@ impl App {
     }
 
     /// Automatically set content-length or transfer-encoding headers based on response body
-    fn finalize_response_headers(&self, response: &mut Response) {
+    fn finalize_response_headers(&self, response: &mut PingoraWebHttpResponse) {
         // Only set headers if neither content-length nor transfer-encoding is already set
         if response.headers.contains_key(http::header::CONTENT_LENGTH)
             || response
@@ -207,6 +286,12 @@ impl App {
                 );
             }
         }
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new(Router::new())
     }
 }
 
@@ -251,7 +336,7 @@ impl HttpServerApp for App {
         // Only need a boolean for HEAD; avoid cloning the Method twice
         let is_head = reqh.method.as_str().eq_ignore_ascii_case("HEAD");
 
-        let mut req = Request::new(reqh.method.clone(), path);
+        let mut req = PingoraHttpRequest::new(reqh.method.clone(), path);
         for (name, value) in reqh.headers.iter() {
             if let Ok(v) = value.to_str() {
                 req = req.header(name.as_str(), v);
@@ -335,18 +420,19 @@ impl HttpServerApp for App {
                                 .write_response_body(filtered_chunk, false)
                                 .await
                                 .is_err()
-                            {
-                                break;
-                            }
+                        {
+                            break;
+                        }
                     }
                     // Final empty chunk to signal end
                     let mut final_body = Some(bytes::Bytes::new());
                     if module_ctx
                         .response_body_filter(&mut final_body, true)
                         .is_ok()
-                        && let Some(final_chunk) = final_body {
-                            let _ = http.write_response_body(final_chunk, true).await;
-                        }
+                        && let Some(final_chunk) = final_body
+                    {
+                        let _ = http.write_response_body(final_chunk, true).await;
+                    }
                 }
             }
         }
@@ -370,23 +456,20 @@ impl HttpServerApp for App {
 mod tests {
     use super::*;
 
-    struct TestLogger(Arc<std::sync::Mutex<Vec<String>>>);
-    use std::sync::Arc;
-    impl Logger for TestLogger {
-        fn log(&self, _level: Level, msg: &str, request_id: &str) {
-            self.0
-                .lock()
-                .unwrap()
-                .push(format!("{}|{}", request_id, msg));
-        }
-    }
+    // no custom Logger/LoggingMiddleware tests; TracingMiddleware covers logging paths
 
     struct HelloHandler;
     #[async_trait::async_trait]
-    impl core::router::Handler for HelloHandler {
-        async fn handle(&self, req: Request) -> Response {
+    impl core::Handler for HelloHandler {
+        async fn handle(
+            &self,
+            req: PingoraHttpRequest,
+        ) -> Result<PingoraWebHttpResponse, WebError> {
             let name = req.param("name").unwrap_or("world");
-            Response::text(StatusCode::OK, format!("Hello {}", name))
+            Ok(PingoraWebHttpResponse::text(
+                StatusCode::OK,
+                format!("Hello {}", name),
+            ))
         }
     }
 
@@ -396,7 +479,7 @@ mod tests {
         router.get("/hi/{name}", Arc::new(HelloHandler));
         let app = App::new(router);
 
-        let req = Request::new(Method::GET, "/hi/alice");
+        let req = PingoraHttpRequest::new(Method::GET, "/hi/alice");
         let res = app.handle(req).await;
         assert_eq!(res.status.as_u16(), 200);
         match res.body {
@@ -415,8 +498,12 @@ mod tests {
         struct Trace(&'static str);
         #[async_trait::async_trait]
         impl Middleware for Trace {
-            async fn handle(&self, req: Request, next: Arc<dyn core::router::Handler>) -> Response {
-                let mut res = next.handle(req).await;
+            async fn handle(
+                &self,
+                req: PingoraHttpRequest,
+                next: Arc<dyn core::Handler>,
+            ) -> Result<PingoraWebHttpResponse, WebError> {
+                let mut res = next.handle(req).await?;
                 // Use header to track middleware execution order
                 let current = res
                     .headers
@@ -427,17 +514,20 @@ mod tests {
                 let _ = res
                     .headers
                     .insert("x-trace", http::HeaderValue::from_str(&new_val).unwrap());
-                res
+                Ok(res)
             }
         }
         struct OkHandler;
         #[async_trait::async_trait]
-        impl core::router::Handler for OkHandler {
-            async fn handle(&self, req: Request) -> Response {
-                let res = Response::text(StatusCode::OK, "H");
+        impl core::Handler for OkHandler {
+            async fn handle(
+                &self,
+                req: PingoraHttpRequest,
+            ) -> Result<PingoraWebHttpResponse, WebError> {
+                let res = PingoraWebHttpResponse::text(StatusCode::OK, "H");
                 // Ensure we have a request-id header from middleware
                 assert!(req.headers().contains_key("x-request-id"));
-                res
+                Ok(res)
             }
         }
         router.get("/ok", Arc::new(OkHandler));
@@ -445,7 +535,9 @@ mod tests {
         app.use_middleware(Trace("A>"));
         app.use_middleware(Trace("B>"));
 
-        let res = app.handle(Request::new(Method::GET, "/ok")).await;
+        let res = app
+            .handle(PingoraHttpRequest::new(Method::GET, "/ok"))
+            .await;
         assert_eq!(res.status.as_u16(), 200);
         // Verify middleware execution order through header
         let trace = res
@@ -457,32 +549,7 @@ mod tests {
         assert!(res.headers.contains_key("x-request-id"));
     }
 
-    #[tokio::test]
-    async fn logger_receives_request_id() {
-        let logs = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let logger = TestLogger(logs.clone());
-
-        let mut router = Router::new();
-        struct IndexHandler;
-        #[async_trait::async_trait]
-        impl core::router::Handler for IndexHandler {
-            async fn handle(&self, _req: Request) -> Response {
-                Response::text(StatusCode::OK, "ok")
-            }
-        }
-
-        router.get("/", Arc::new(IndexHandler));
-        let mut app = App::new(router);
-        app.use_middleware(super::logging_middleware::LoggingMiddleware::new(logger));
-        let _ = app.handle(Request::new(Method::GET, "/")).await;
-
-        let entries = logs.lock().unwrap();
-        assert!(!entries.is_empty());
-        // format: "<request_id>|<message>" - request_id might be empty if logging runs before RequestId middleware
-        assert!(entries.iter().any(|s| s.contains("-> 200")));
-        // Since LoggingMiddleware runs before RequestId in the middleware stack, request_id might be empty
-        assert!(entries.iter().any(|s| s.contains("GET / -> 200")));
-    }
+    // Logging is handled by TracingMiddleware; no direct logging middleware tests
 
     #[tokio::test]
     async fn app_data_available_in_handler() {
@@ -493,10 +560,13 @@ mod tests {
 
         struct UseCfg;
         #[async_trait::async_trait]
-        impl core::router::Handler for UseCfg {
-            async fn handle(&self, req: Request) -> Response {
+        impl core::Handler for UseCfg {
+            async fn handle(
+                &self,
+                req: PingoraHttpRequest,
+            ) -> Result<PingoraWebHttpResponse, WebError> {
                 let cfg = req.get_app_share_data::<Cfg>().expect("cfg present");
-                Response::text(StatusCode::OK, cfg.msg)
+                Ok(PingoraWebHttpResponse::text(StatusCode::OK, cfg.msg))
             }
         }
 
@@ -505,7 +575,7 @@ mod tests {
         let app = App::new(router);
         app.set_app_share_data(Arc::new(Cfg { msg: "hello" }));
 
-        let res = app.handle(Request::new(Method::GET, "/")).await;
+        let res = app.handle(PingoraHttpRequest::new(Method::GET, "/")).await;
         match res.body {
             core::response::Body::Bytes(b) => assert_eq!(std::str::from_utf8(&b).unwrap(), "hello"),
             _ => panic!("unexpected streaming body"),
@@ -519,9 +589,9 @@ mod tests {
         impl Middleware for PutNum {
             async fn handle(
                 &self,
-                mut req: Request,
-                next: Arc<dyn core::router::Handler>,
-            ) -> Response {
+                mut req: PingoraHttpRequest,
+                next: Arc<dyn core::Handler>,
+            ) -> Result<PingoraWebHttpResponse, WebError> {
                 req.set_request_share_data(Arc::new(7u32));
                 next.handle(req).await
             }
@@ -529,10 +599,16 @@ mod tests {
 
         struct ReadNum;
         #[async_trait::async_trait]
-        impl core::router::Handler for ReadNum {
-            async fn handle(&self, req: Request) -> Response {
+        impl core::Handler for ReadNum {
+            async fn handle(
+                &self,
+                req: PingoraHttpRequest,
+            ) -> Result<PingoraWebHttpResponse, WebError> {
                 let n = req.get_request_share_data::<u32>().expect("n");
-                Response::text(StatusCode::OK, format!("{}", *n))
+                Ok(PingoraWebHttpResponse::text(
+                    StatusCode::OK,
+                    format!("{}", *n),
+                ))
             }
         }
 
@@ -541,7 +617,7 @@ mod tests {
         let mut app = App::new(router);
         app.use_middleware(PutNum);
 
-        let res = app.handle(Request::new(Method::GET, "/n")).await;
+        let res = app.handle(PingoraHttpRequest::new(Method::GET, "/n")).await;
         match res.body {
             core::response::Body::Bytes(b) => assert_eq!(std::str::from_utf8(&b).unwrap(), "7"),
             _ => panic!("unexpected streaming body"),
@@ -552,9 +628,12 @@ mod tests {
     async fn app_sets_content_length() {
         struct TextHandler;
         #[async_trait::async_trait]
-        impl core::router::Handler for TextHandler {
-            async fn handle(&self, _req: Request) -> Response {
-                Response::text(StatusCode::OK, "hello world")
+        impl core::Handler for TextHandler {
+            async fn handle(
+                &self,
+                _req: PingoraHttpRequest,
+            ) -> Result<PingoraWebHttpResponse, WebError> {
+                Ok(PingoraWebHttpResponse::text(StatusCode::OK, "hello world"))
             }
         }
 
@@ -562,7 +641,9 @@ mod tests {
         router.get("/text", Arc::new(TextHandler));
         let app = App::new(router);
 
-        let res = app.handle(Request::new(Method::GET, "/text")).await;
+        let res = app
+            .handle(PingoraHttpRequest::new(Method::GET, "/text"))
+            .await;
 
         // Verify content-length is automatically set
         assert_eq!(
@@ -590,9 +671,13 @@ mod tests {
     async fn app_respects_manual_content_length() {
         struct ManualHandler;
         #[async_trait::async_trait]
-        impl core::router::Handler for ManualHandler {
-            async fn handle(&self, _req: Request) -> Response {
-                Response::text(StatusCode::OK, "hello").header("content-length", "999")
+        impl core::Handler for ManualHandler {
+            async fn handle(
+                &self,
+                _req: PingoraHttpRequest,
+            ) -> Result<PingoraWebHttpResponse, WebError> {
+                Ok(PingoraWebHttpResponse::text(StatusCode::OK, "hello")
+                    .header("content-length", "999"))
             }
         }
 
@@ -600,7 +685,9 @@ mod tests {
         router.get("/manual", Arc::new(ManualHandler));
         let app = App::new(router);
 
-        let res = app.handle(Request::new(Method::GET, "/manual")).await;
+        let res = app
+            .handle(PingoraHttpRequest::new(Method::GET, "/manual"))
+            .await;
 
         // Verify manual content-length is preserved
         assert_eq!(

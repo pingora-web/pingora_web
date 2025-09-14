@@ -1,6 +1,7 @@
 use crate::{
-    core::router::Handler,
-    core::{Request, Response},
+    core::Handler,
+    core::{PingoraHttpRequest, PingoraWebHttpResponse},
+    error::WebError,
     middleware::Middleware,
 };
 use std::sync::Arc;
@@ -26,7 +27,11 @@ impl Default for RequestId {
 
 #[async_trait::async_trait]
 impl Middleware for RequestId {
-    async fn handle(&self, mut req: Request, next: Arc<dyn Handler>) -> Response {
+    async fn handle(
+        &self,
+        mut req: PingoraHttpRequest,
+        next: Arc<dyn Handler>,
+    ) -> Result<PingoraWebHttpResponse, WebError> {
         // Generate or use existing request ID
         let request_id = req
             .headers()
@@ -37,10 +42,12 @@ impl Middleware for RequestId {
             .unwrap_or_else(crate::utils::request_id::generate);
 
         // Store request ID in request headers for later access
-        req.headers_mut()
-            .insert(self.header, request_id.clone().try_into().unwrap());
+        let _ = req.headers_mut().insert(
+            self.header,
+            http::HeaderValue::from_str(&request_id).unwrap(),
+        );
 
-        let mut res = next.handle(req).await;
+        let mut res = next.handle(req).await?;
 
         // Ensure response has the request ID header
         if !res.headers.contains_key(self.header) {
@@ -49,6 +56,6 @@ impl Middleware for RequestId {
                 http::HeaderValue::from_str(&request_id).unwrap(),
             );
         }
-        res
+        Ok(res)
     }
 }

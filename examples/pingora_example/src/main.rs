@@ -7,8 +7,8 @@ use pingora::services::listening::Service;
 use pingora_web::StatusCode;
 use pingora_web::utils::ServeDir;
 use pingora_web::{
-    App, Handler, LimitsConfig, LimitsMiddleware, PanicRecoveryMiddleware, Request, Response,
-    ResponseCompressionBuilder, Router, TracingMiddleware,
+    App, Handler, LimitsConfig, LimitsMiddleware, PanicRecoveryMiddleware, PingoraHttpRequest,
+    PingoraWebHttpResponse, ResponseCompressionBuilder, TracingMiddleware, WebError,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -26,9 +26,9 @@ impl RootHandler {
 
 #[async_trait]
 impl Handler for RootHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         tracing::info!("处理根路径请求");
-        Response::text(StatusCode::OK, "ok")
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, "ok"))
     }
 }
 
@@ -42,9 +42,9 @@ impl FooHandler {
 
 #[async_trait]
 impl Handler for FooHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         tracing::info!("处理 /foo 请求");
-        Response::text(StatusCode::OK, "get_foo")
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, "get_foo"))
     }
 }
 
@@ -58,9 +58,9 @@ impl FooBarHandler {
 
 #[async_trait]
 impl Handler for FooBarHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         tracing::info!("处理 /foo/bar 请求");
-        Response::text(StatusCode::OK, "foo_bar")
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, "foo_bar"))
     }
 }
 
@@ -79,11 +79,14 @@ impl CfgHandler {
 
 #[async_trait]
 impl Handler for CfgHandler {
-    async fn handle(&self, req: Request) -> Response {
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         if let Some(cfg) = req.get_app_share_data::<Cfg>() {
-            Response::text(StatusCode::OK, cfg.banner)
+            Ok(PingoraWebHttpResponse::text(StatusCode::OK, cfg.banner))
         } else {
-            Response::text(StatusCode::INTERNAL_SERVER_ERROR, "missing cfg")
+            Ok(PingoraWebHttpResponse::text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "missing cfg",
+            ))
         }
     }
 }
@@ -98,7 +101,7 @@ impl PanicHandler {
 
 #[async_trait]
 impl Handler for PanicHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         tracing::info!("即将触发panic用于测试");
         panic!("这是一个测试panic!");
     }
@@ -114,11 +117,14 @@ impl SlowHandler {
 
 #[async_trait]
 impl Handler for SlowHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         // 延迟35秒，超过默认30秒超时设置
         tracing::info!("开始处理慢请求，将延迟35秒");
         tokio::time::sleep(std::time::Duration::from_secs(35)).await;
-        Response::text(StatusCode::OK, "这个响应永远不会被看到，因为会超时")
+        Ok(PingoraWebHttpResponse::text(
+            StatusCode::OK,
+            "这个响应永远不会被看到，因为会超时",
+        ))
     }
 }
 
@@ -132,19 +138,19 @@ impl GeneratedStreamHandler {
 
 #[async_trait]
 impl Handler for GeneratedStreamHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         // 模拟动态生成大数据：每 10ms 生成一块数据，共 100 块
-        let mut i = 0u32;
-        let s = stream::unfold((), move |_| async move {
+        // 使用 unfold 的状态来保存计数，避免捕获局部变量导致始终为 0 的问题
+        let s = stream::unfold(0u32, |i| async move {
             if i >= 100 {
                 return None;
             }
-            i += 1;
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            Some((Bytes::from(format!("chunk-{}\n", i).into_bytes()), ()))
+            let next = i + 1;
+            Some((Bytes::from(format!("chunk-{}\n", next).into_bytes()), next))
         });
-        Response::stream(StatusCode::OK, s.boxed())
-            .header("content-type", "text/plain; charset=utf-8")
+        Ok(PingoraWebHttpResponse::stream(StatusCode::OK, s.boxed())
+            .header("content-type", "text/plain; charset=utf-8"))
     }
 }
 
@@ -156,57 +162,63 @@ fn main() {
         .with_span_events(FmtSpan::CLOSE)
         .init();
 
-    // 创建路由器
-    let mut router = Router::new();
-    router.get("/", RootHandler::new());
-    router.get("/foo", FooHandler::new());
-    router.get("/foo/bar", FooBarHandler::new());
-    router.get("/cfg", CfgHandler::new());
-    router.get("/json", JsonHandler::new());
-    router.post("/echo_json", EchoJsonHandler::new());
+    // 创建 App 并注册路由
+    let mut app = App::default();
+    app.get("/", RootHandler::new());
+    app.get("/foo", FooHandler::new());
+    app.get("/foo/bar", FooBarHandler::new());
+    app.get("/cfg", CfgHandler::new());
+    app.get("/json", JsonHandler::new());
+    app.post("/echo_json", EchoJsonHandler::new());
 
     // 闭包路由示例 (新功能) - 更简洁的语法
-    router.get_fn("/hello", |_req| {
-        Response::text(StatusCode::OK, "Hello from closure!")
+    app.get_fn("/hello", |_req| {
+        Ok(PingoraWebHttpResponse::text(
+            StatusCode::OK,
+            "Hello from closure!",
+        ))
     });
 
-    router.get_fn("/hello/{name}", |req| {
+    app.get_fn("/hello/{name}", |req| {
         let name = req.param("name").unwrap_or("Anonymous");
-        Response::text(StatusCode::OK, format!("Hello {}!", name))
+        Ok(PingoraWebHttpResponse::text(
+            StatusCode::OK,
+            format!("Hello {}!", name),
+        ))
     });
 
-    router.get_fn("/api/status", |_req| {
-        Response::json(
+    app.get_fn("/api/status", |_req| {
+        Ok(PingoraWebHttpResponse::json(
             StatusCode::OK,
             serde_json::json!({
                 "status": "ok",
                 "message": "Server is running",
                 "uptime": "N/A"
             }),
-        )
+        ))
     });
 
-    router.post_fn("/api/echo", |req| {
+    app.post_fn("/api/echo", |req| {
         // 简单的 echo 服务
         let body_str = String::from_utf8_lossy(req.body());
-        Response::json(
+        Ok(PingoraWebHttpResponse::json(
             StatusCode::OK,
             serde_json::json!({
                 "received": body_str,
                 "length": req.body().len()
             }),
-        )
+        ))
     });
 
-    router.get("/assets/{path}", Arc::new(ServeDir::new(".")));
-    router.get("/stream-gen", GeneratedStreamHandler::new());
-    router.get("/slow", SlowHandler::new());
-    router.get("/panic", PanicHandler::new());
-    router.get("/large-text", LargeTextHandler::new());
-    router.get("/large-json", LargeJsonHandler::new());
+    app.get("/assets/{path}", Arc::new(ServeDir::new(".")));
+    app.get("/stream-gen", GeneratedStreamHandler::new());
+    app.get("/slow", SlowHandler::new());
+    app.get("/panic", PanicHandler::new());
+    app.get("/large-text", LargeTextHandler::new());
+    app.get("/large-json", LargeJsonHandler::new());
 
     // 创建应用并添加中间件
-    let mut app = App::new(router);
+    let mut app = app;
     // 提供 App 级共享数据
     app.set_app_share_data(Arc::new(Cfg {
         banner: "pingora_web",
@@ -281,14 +293,14 @@ impl JsonHandler {
 
 #[async_trait]
 impl Handler for JsonHandler {
-    async fn handle(&self, _req: Request) -> Response {
-        Response::json(
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
+        Ok(PingoraWebHttpResponse::json(
             StatusCode::OK,
             Info {
                 ok: true,
                 message: "hello",
             },
-        )
+        ))
     }
 }
 
@@ -302,10 +314,13 @@ impl EchoJsonHandler {
 
 #[async_trait]
 impl Handler for EchoJsonHandler {
-    async fn handle(&self, req: Request) -> Response {
+    async fn handle(&self, req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         match serde_json::from_slice::<Value>(req.body()) {
-            Ok(v) => Response::json(StatusCode::OK, v),
-            Err(e) => Response::text(StatusCode::BAD_REQUEST, format!("invalid json: {}", e)),
+            Ok(v) => Ok(PingoraWebHttpResponse::json(StatusCode::OK, v)),
+            Err(e) => Ok(PingoraWebHttpResponse::text(
+                StatusCode::BAD_REQUEST,
+                format!("invalid json: {}", e),
+            )),
         }
     }
 }
@@ -320,10 +335,10 @@ impl LargeTextHandler {
 
 #[async_trait]
 impl Handler for LargeTextHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         // 生成一个大的重复文本，非常适合压缩
         let large_text = "这是一段重复的文本内容，用于测试HTTP压缩功能。".repeat(200);
-        Response::text(StatusCode::OK, large_text)
+        Ok(PingoraWebHttpResponse::text(StatusCode::OK, large_text))
     }
 }
 
@@ -337,7 +352,7 @@ impl LargeJsonHandler {
 
 #[async_trait]
 impl Handler for LargeJsonHandler {
-    async fn handle(&self, _req: Request) -> Response {
+    async fn handle(&self, _req: PingoraHttpRequest) -> Result<PingoraWebHttpResponse, WebError> {
         // 生成一个包含大量重复数据的JSON，适合压缩
         let data: Vec<serde_json::Value> = (0..100)
             .map(|i| serde_json::json!({
@@ -353,13 +368,13 @@ impl Handler for LargeJsonHandler {
             }))
             .collect();
 
-        Response::json(
+        Ok(PingoraWebHttpResponse::json(
             StatusCode::OK,
             serde_json::json!({
                 "users": data,
                 "total": 100,
                 "message": "这是一个大的JSON响应，包含重复数据用于测试压缩功能"
             }),
-        )
+        ))
     }
 }

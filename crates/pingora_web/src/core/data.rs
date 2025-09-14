@@ -21,10 +21,6 @@ impl AppData {
         }
     }
 
-    pub fn provide<T: Send + Sync + 'static>(&self, value: T) -> Option<Arc<T>> {
-        self.provide_arc(Arc::new(value))
-    }
-
     pub fn provide_arc<T: Send + Sync + 'static>(&self, value: Arc<T>) -> Option<Arc<T>> {
         let type_id = TypeId::of::<T>();
         let mut map = self.inner.write().expect("AppData poisoned");

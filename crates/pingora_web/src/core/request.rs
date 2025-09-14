@@ -3,44 +3,18 @@ use std::collections::HashMap;
 
 use crate::core::data::AppData;
 use bytes::Bytes;
-use http::{HeaderMap, HeaderValue, Method, Uri};
+use http::{HeaderMap, HeaderName, HeaderValue, Method, Uri};
 use serde::de::DeserializeOwned;
 
 #[derive(Debug)]
-pub struct Request {
+pub struct PingoraHttpRequest {
     pub inner: http::Request<Bytes>,
     pub params: HashMap<String, String>,
     pub app_data: Option<std::sync::Arc<AppData>>, // App-level shared data
     pub extensions: HashMap<TypeId, std::sync::Arc<dyn std::any::Any + Send + Sync>>, // request-level data
 }
 
-// impl Clone for Request {
-//     fn clone(&self) -> Self {
-//         // Clone the http::Request manually since http::Request<B> doesn't impl Clone
-//         let mut builder = http::Request::builder()
-//             .method(self.inner.method())
-//             .uri(self.inner.uri())
-//             .version(self.inner.version());
-//
-//         // Clone headers
-//         for (name, value) in self.inner.headers() {
-//             builder = builder.header(name, value);
-//         }
-//
-//         let cloned_inner = builder
-//             .body(self.inner.body().clone())
-//             .expect("Failed to clone request");
-//
-//         Self {
-//             inner: cloned_inner,
-//             params: self.params.clone(),
-//             app_data: self.app_data.clone(),
-//             extensions: self.extensions.clone(),
-//         }
-//     }
-// }
-
-impl Request {
+impl PingoraHttpRequest {
     pub fn new<M: Into<Method>, S: AsRef<str>>(method: M, path: S) -> Self {
         let inner = http::Request::builder()
             .method(method.into())
@@ -56,15 +30,13 @@ impl Request {
         }
     }
 
-    pub fn header<K, V>(mut self, k: K, v: V) -> Self
-    where
-        K: TryInto<http::HeaderName>,
-        V: TryInto<HeaderValue>,
-        K::Error: std::fmt::Debug,
-        V::Error: std::fmt::Debug,
-    {
-        if let (Ok(key), Ok(value)) = (k.try_into(), v.try_into()) {
-            self.inner.headers_mut().insert(key, value);
+    /// Set a request header (simple string-based API)
+    pub fn header(mut self, k: impl AsRef<str>, v: impl AsRef<str>) -> Self {
+        if let (Ok(name), Ok(value)) = (
+            HeaderName::try_from(k.as_ref()),
+            HeaderValue::from_str(v.as_ref()),
+        ) {
+            self.inner.headers_mut().insert(name, value);
         }
         self
     }
@@ -162,18 +134,16 @@ impl Request {
     where
         T: DeserializeOwned,
     {
-        let content_type = self
-            .headers()
-            .get("content-type")
-            .and_then(|ct| ct.to_str().ok())
-            .unwrap_or("");
+        let content_type = match self.headers().get("content-type") {
+            Some(ct) => ct.to_str().unwrap_or(""),
+            None => "",
+        };
 
         if !content_type.starts_with("application/x-www-form-urlencoded") {
             return Err(FormParseError::InvalidContentType(content_type.to_string()));
         }
 
-        let body_str =
-            std::str::from_utf8(self.body()).map_err(FormParseError::Utf8Error)?;
+        let body_str = std::str::from_utf8(self.body()).map_err(FormParseError::Utf8Error)?;
 
         serde_urlencoded::from_str(body_str)
             .map_err(|e| FormParseError::DeserializeError(e.to_string()))
@@ -200,6 +170,13 @@ impl std::fmt::Display for FormParseError {
 
 impl std::error::Error for FormParseError {}
 
+// Implement ResponseError for FormParseError
+impl crate::error::ResponseError for FormParseError {
+    fn status_code(&self) -> http::StatusCode {
+        http::StatusCode::BAD_REQUEST
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_parse_form_urlencoded() {
-        let req = Request::new(Method::POST, "/login")
+        let req = PingoraHttpRequest::new(Method::POST, "/login")
             .header("content-type", "application/x-www-form-urlencoded")
             .with_body("username=alice&password=secret123");
 
@@ -224,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_parse_form_simple() {
-        let req = Request::new(Method::POST, "/form")
+        let req = PingoraHttpRequest::new(Method::POST, "/form")
             .header("content-type", "application/x-www-form-urlencoded")
             .with_body("name=John&email=john@example.com&age=30");
 
@@ -236,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_parse_form_invalid_content_type() {
-        let req = Request::new(Method::POST, "/login")
+        let req = PingoraHttpRequest::new(Method::POST, "/login")
             .header("content-type", "application/json")
             .with_body(r#"{"username": "alice"}"#);
 
@@ -250,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_urlencoded_special_characters() {
-        let req = Request::new(Method::POST, "/form")
+        let req = PingoraHttpRequest::new(Method::POST, "/form")
             .header("content-type", "application/x-www-form-urlencoded")
             .with_body("message=Hello%20World%21&symbol=%26%3D%3F");
 

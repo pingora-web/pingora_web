@@ -5,7 +5,8 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use super::Middleware;
-use crate::core::{Request, Response, router::Handler};
+use crate::core::{Handler, PingoraHttpRequest, PingoraWebHttpResponse};
+use crate::error::{ResponseError, WebError};
 
 /// Simple panic recovery middleware that catches panics and returns 500 errors
 pub struct PanicRecoveryMiddleware;
@@ -24,39 +25,73 @@ impl Default for PanicRecoveryMiddleware {
 
 #[async_trait]
 impl Middleware for PanicRecoveryMiddleware {
-    async fn handle(&self, req: Request, next: Arc<dyn Handler>) -> Response {
+    async fn handle(
+        &self,
+        req: PingoraHttpRequest,
+        next: Arc<dyn Handler>,
+    ) -> Result<PingoraWebHttpResponse, WebError> {
         // Wrap the next handler call in a catch_unwind
         let result = AssertUnwindSafe(next.handle(req)).catch_unwind().await;
 
-        result.unwrap_or_else(|panic_info| {
-            // Extract panic message if possible
-            let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "Unknown panic occurred".to_string()
-            };
+        match result {
+            Ok(handler_result) => handler_result,
+            Err(panic_info) => {
+                // Extract panic message
+                let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "Unknown panic occurred".to_string()
+                };
 
-            // Log the panic
-            tracing::error!("Panic caught in request handler: {}", panic_msg);
+                // Create panic error
+                let panic_error = PanicError::new(panic_msg);
+                Err(WebError::new(panic_error))
+            }
+        }
+    }
+}
 
-            // Return a 500 Internal Server Error
-            Response::text(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
-        })
+/// Error type for panics
+#[derive(Debug)]
+struct PanicError {
+    message: String,
+}
+
+impl PanicError {
+    fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl std::fmt::Display for PanicError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Panic: {}", self.message)
+    }
+}
+
+impl std::error::Error for PanicError {}
+
+impl ResponseError for PanicError {
+    fn status_code(&self) -> StatusCode {
+        StatusCode::INTERNAL_SERVER_ERROR
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Method, Request};
+    use crate::core::{Method, PingoraHttpRequest};
 
     struct PanicHandler;
 
     #[async_trait]
     impl Handler for PanicHandler {
-        async fn handle(&self, _req: Request) -> Response {
+        async fn handle(
+            &self,
+            _req: PingoraHttpRequest,
+        ) -> Result<PingoraWebHttpResponse, WebError> {
             panic!("Test panic message");
         }
     }
@@ -65,8 +100,11 @@ mod tests {
 
     #[async_trait]
     impl Handler for NormalHandler {
-        async fn handle(&self, _req: Request) -> Response {
-            Response::text(StatusCode::OK, "ok")
+        async fn handle(
+            &self,
+            _req: PingoraHttpRequest,
+        ) -> Result<PingoraWebHttpResponse, WebError> {
+            Ok(PingoraWebHttpResponse::text(StatusCode::OK, "ok"))
         }
     }
 
@@ -74,19 +112,27 @@ mod tests {
     async fn test_panic_recovery() {
         let middleware = PanicRecoveryMiddleware::new();
         let handler = Arc::new(PanicHandler);
-        let req = Request::new(Method::GET, "/test");
+        let req = PingoraHttpRequest::new(Method::GET, "/test");
 
-        let response = middleware.handle(req, handler).await;
-        assert_eq!(response.status.as_u16(), 500);
+        let result = middleware.handle(req, handler).await;
+        assert!(result.is_err());
+        if let Err(error) = result {
+            assert_eq!(
+                error.as_response_error().status_code(),
+                StatusCode::INTERNAL_SERVER_ERROR
+            );
+        }
     }
 
     #[tokio::test]
     async fn test_normal_request_passes_through() {
         let middleware = PanicRecoveryMiddleware::new();
         let handler = Arc::new(NormalHandler);
-        let req = Request::new(Method::GET, "/test");
+        let req = PingoraHttpRequest::new(Method::GET, "/test");
 
-        let response = middleware.handle(req, handler).await;
+        let result = middleware.handle(req, handler).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
         assert_eq!(response.status.as_u16(), 200);
     }
 }

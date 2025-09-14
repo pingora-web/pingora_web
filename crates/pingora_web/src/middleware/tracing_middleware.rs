@@ -1,6 +1,7 @@
-use crate::core::router::Handler;
+use crate::core::Handler;
 use crate::{
-    core::{Request, Response},
+    core::{PingoraHttpRequest, PingoraWebHttpResponse},
+    error::WebError,
     middleware::Middleware,
 };
 use async_trait::async_trait;
@@ -26,7 +27,11 @@ impl Default for TracingMiddleware {
 
 #[async_trait]
 impl Middleware for TracingMiddleware {
-    async fn handle(&self, req: Request, next: Arc<dyn Handler>) -> Response {
+    async fn handle(
+        &self,
+        req: PingoraHttpRequest,
+        next: Arc<dyn Handler>,
+    ) -> Result<PingoraWebHttpResponse, WebError> {
         let request_id = req
             .headers()
             .get("x-request-id")
@@ -56,7 +61,7 @@ impl Middleware for TracingMiddleware {
 
             let start_time = std::time::Instant::now();
 
-            let res = next.handle(req).await;
+            let res = next.handle(req).await?;
 
             let elapsed_ms = start_time.elapsed().as_millis();
 
@@ -67,7 +72,7 @@ impl Middleware for TracingMiddleware {
             // Log the request completion
             info!("Request completed");
 
-            res
+            Ok(res)
         }
         .instrument(span)
         .await
